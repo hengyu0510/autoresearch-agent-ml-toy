@@ -7,7 +7,8 @@
 > 当前状态（2026-09-08）：5 个 Kaggle 任务的数据/Baseline/提交管线已打通；
 > LLM（deepseek-v4-flash, effort=max）在 5 个任务各完成 3 轮真实迭代，
 > rule 大脑完成确定性闭环复现；`reports/technical_report.md` 已整理，
-> 最佳参数与一份完整示例运行已随仓库提交（见“提交管线”与目录结构）。
+> 最佳参数与一份完整示例运行已随仓库提交；LLM 大脑已加入每轮反思与
+> 实验笔记（见“实验反思与笔记”）。
 
 ## 环境与安装
 
@@ -137,6 +138,7 @@ runs/<task_id>/<timestamp>/
 ├── summary.json       # 最佳结果与停止原因
 ├── checkpoint.json    # 每完成一步的续跑检查点（--resume 读取）
 ├── RUN_LOG.md         # 可读运行日志
+├── notebook.md        # 实验笔记：diagnosis/conclusion/hypothesis
 ├── snapshots/         # 每轮参数快照（可复现/可喂给 submit.py）
 ├── metrics/           # 每轮指标 JSON
 ├── logs/              # 每轮 stdout/stderr
@@ -255,6 +257,36 @@ brain:
   或越界超参会被拒绝并回退 rule；
 - 旧版超参（如 `max_features: auto`）会统一清洗为 sklearn 可用取值。
 
+## 实验反思与笔记（Reflection & Notebook）
+
+LLM 大脑在每轮实验评估完成后会追加一次轻量反思调用，返回结构化 JSON：
+
+```json
+{
+  "diagnosis": "为什么这一轮会是这个结果",
+  "conclusion": "本轮结论，哪些方向已被证伪",
+  "hypothesis": "下一步值得验证的假设"
+}
+```
+
+每条 insight 同时写入：
+
+- `state.jsonl`（机器可读，随 run 保留并参与 `--resume`）；
+- `runs/<task_id>/<timestamp>/notebook.md`（人类可读实验笔记）。
+
+下一次 plan 的 prompt 会包含三部分上下文：最近 6 轮实验（含上一轮 rationale
+与决策说明）、实验笔记中最近的 8 条 insight、最近失败/错误记录；prompt 明确
+要求“已被结论证伪的方向不要重复”。这样每步计划都建立在历史认知上，而不是
+只看到 val/test 数字。
+
+容错与边界：
+
+- LLM 反思失败（网络/JSON 解析等）不会让 run 失败：自动用确定性 insight
+  兜底并继续；
+- rule 大脑不额外调用 API，每轮只写确定性 insight；
+- 当前反思仍只能提出模型/缩放/超参假设，不能直接改特征工程代码；
+- 反思结果是“下一轮计划的参考”，不直接改变终止/采纳/回退逻辑。
+
 ## LLM 实测结果（2026-09-07，每任务 3 轮）
 
 | 任务 | run_id | 最佳实验 | val | test |
@@ -328,7 +360,8 @@ Agent 运行失败时会以非零退出码结束（`stop_failure`、0 轮成功�
 
 - 提交脚本已验证格式；实际上传 Kaggle 需显式 `--kaggle-upload`，老竞赛是否
   仍开放线上提交取决于账号与比赛状态；
-- `rule` 大脑是确定性候选序列，无真正"反思式实验设计"；
+- `rule` 大脑仍是确定性候选序列，无真正"反思式实验设计"；LLM 大脑已具备
+  "轻量反思 + 实验笔记"，但只能提出模型/超参假设，还不能做代码级特征工程；
 - 断点续跑只保证从最近“已完成 step”继续；中断在实验执行中途时，该 step 会
   从方案重跑一次。已正常完成的 run 会拒绝 `--resume`（需新 run 或手动改名
   `summary.json` 后才继续）。旧 run 无 checkpoint 时会尽力从 state.jsonl 恢复；

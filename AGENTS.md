@@ -22,8 +22,9 @@
 | 实验任务 | 5 个 Kaggle 任务（`tasks/tasks.yaml`）：titanic、house_prices、bike_sharing_demand、digit_recognizer、facial_keypoints；`experiments/train.py` 保留 sklearn 乳腺癌数据作为通用示例 |
 | 系统形态 | Python 自治进程（单任务入口 `run_agent.py`，批量入口 `run_all.py`）；决策大脑可插拔：`rule`（无 Key、确定性候选）与 `llm`（真实 API，默认 DeepSeek deepseek-v4-flash） |
 | 数据与指标 | 每个任务固定 seed 划分；决策只看 `val_*` 指标，最终只报 `test_*`；指标方向由 `run.higher_is_better` 配置（bike 按时间顺序切分，facial 按行切分并逐坐标训练） |
-| 迭代闭环 | planner → executor → evaluator → state → 决策（继续/回退/停止）；每步参数快照与 stdout/stderr 落盘 |
+| 迭代闭环 | planner → executor → evaluator → reflect/insight → 决策（继续/回退/停止）；每步参数快照与 stdout/stderr 落盘 |
 | 失败与恢复 | LLM 空响应/截断 JSON 自动重试一次，再失败回退 rule；步骤错误先读 traceback 再重试；连续致命错误按阈值退出 |
+| 实验反思 | LLM 每轮评估后调用轻量 reflect（diagnosis/conclusion/hypothesis）写入 state + notebook.md；plan prompt 附带历史 rationale、insight 与最近失败；反思失败自动回退确定性 insight，不致命 |
 | 终止机制 | 各任务 config 默认 `max_steps=6`、`min_iterations=3`；提升不足达到收敛轮数、达到最大步数、连续失败三类退出均写入 state；`stop_failure`/0 轮成功/提交失败映射为非零退出码 |
 | 状态记录 | `runs/<task_id>/<timestamp>/state.jsonl` 全量事件 + `checkpoint.json` 断点；含输入、决策、工具调用、输出、错误与下一步动作 |
 | 断点续跑 | `run_agent --resume [run_dir|latest]` / `run_all --resume`：从 checkpoint 的 next_step 恢复大脑游标、最佳参数、收敛状态；无 checkpoint 旧 run 从 state.jsonl 重建；已正常完成 run 拒绝恢复 |
@@ -51,13 +52,22 @@ run_agent 会把内部状态写入 `runs/<task_id>/<timestamp>/checkpoint.json`�
 - 旧 run 无 checkpoint 时从 state.jsonl 重建（成功轮数/最佳参数/rule 游标，
   收敛历史近似重置）。
 
+### 2.2 实验反思与笔记
+
+- 每轮 evaluate 结束后记录一条 `insight`（LLM 反思优先，确定性兜底）；
+- insight 写入 `state.jsonl` 与 `notebook.md`，随 run/`--resume` 保留；
+- plan 的上下文包含：最近实验及上轮 rationale、最近 insight、最近失败记录；
+- 反思只影响下一轮 plan，不改变 accept/revert/停止逻辑；
+- 反思目前限定在模型/缩放/超参空间，不直接改训练/数据处理代码。
+
 ## 3. 工作约定
 
 1. **真实执行**：所有"运行/修改"必须是真实工具调用（文件读写、Python / Shell
    执行），禁止仅在对话中声称已运行。
 2. **先读后改**：动手前阅读 `init.md`、本文件与现有代码；不破坏 `init.md`。
 3. **状态先行**：每步修改或实验先写状态，出错先记录 traceback 再修复/回退。
-   每个已完成 step 必须同步更新 checkpoint.json，保证任意时刻被杀都可恢复；
+   每个已完成 step 必须同步更新 checkpoint.json，评估后必须写入 insight 并
+   刷新 notebook.md，保证任意时刻被杀都可恢复；
 4. **独立验证**：检查进程退出码、输出文件与指标合理性；每轮加入反思，不以
    训练集指标下结论。
 5. **小步有据**：每轮基于明确假设或上轮结论，避免盲目反复调参。
@@ -93,7 +103,7 @@ Autoresearch-agent-ml/
 │   ├── train.py           # 乳腺癌示例
 │   └── tasks/<task_id>/   # train.py + baseline.yaml + submit.py
 ├── submissions/           # 提交文件、指标与最佳参数 YAML（已校验）
-├── runs/<task_id>/        # 各任务运行产物 + checkpoint.json（gitignore）
+├── runs/<task_id>/        # 运行产物：state/checkpoint/notebook/snapshots（gitignore）
 └── reports/               # technical_report.md + example_runs/（完整运行日志已入库）
 ```
 
@@ -120,6 +130,9 @@ Autoresearch-agent-ml/
 - [x] `--resume` 断点续跑：checkpoint 每完成一步落盘；规则/LLM 大脑游标、最佳
       参数、收敛与失败计数可恢复；旧 run 兼容从 state.jsonl 重建；run_all 可
       批量续跑各任务最新 run；
+- [x] 反思与实验笔记：LLM 每轮 reflect（diagnosis/conclusion/hypothesis）写
+      state + notebook.md；plan prompt 注入历史 rationale/insight/失败记录；
+      反思失败走确定性兜底；
 - [x] LLM params 程序级白名单与资源/超参边界校验，非白名单字段自动忽略；
 - [x] 提交管线修复：bike/digit 保留原始行序与 ImageId；validator 增加数值/NaN/Inf
       校验；`--kaggle-upload` 可显式实际上传；

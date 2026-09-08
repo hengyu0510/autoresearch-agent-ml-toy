@@ -57,6 +57,7 @@ run_agent.py（单任务入口）+ run_all.py（一键批量入口）
 plan（rule/LLM 提出 params）
   → execute（写入快照，真实运行 train.py）
   → evaluate（对比 val 指标，accept / revert）
+  → reflect/insight（LLM 反思或确定性 insight，写入实验笔记）
   → decision（继续 / 回退 / 停止）
   →（停止后）自动提交（best 快照 → submit.py → 格式校验）
 ```
@@ -88,6 +89,9 @@ RUN_LOG.md，满足
 - `rule` 大脑：确定性候选序列，无需 API key，适合复现与验证；
 - `llm` 大脑：真实调用 DeepSeek；模型/端点/effort 通过 `.env` 注入；
 - 空响应或 JSON 截断自动重试一次，仍失败则回退 rule；
+- 每轮评估后追加轻量 reflect，返回 diagnosis/conclusion/hypothesis；insight
+  写入 state.jsonl 与 notebook.md，并在后续 plan prompt 中作为实验笔记参考
+  （反思失败自动回退确定性 insight）；
 - LLM 输出的 params 会先做程序级校验：模型名必须在白名单内、顶层字段只保留
   配置允许的 key、scaler/hyperparams/任务级字段做类型与边界清洗
   （如 `max_features: auto → sqrt`、`n_estimators`/`max_iter` 上限）；
@@ -156,7 +160,8 @@ sample 比对格式（含行序、数值/NaN/Inf 校验）”，结果写入 sta
 
 - 5 个 Kaggle 竞赛均为历史比赛，真实线上提交未执行；提交文件仅完成本地格式
   校验；如需实际上传可显式 `--kaggle-upload`，是否仍开放提交取决于比赛状态；
-- `rule` 大脑是确定性候选序列，不具备真正的“反思式实验设计”；
+- `rule` 大脑是确定性候选序列，不具备真正的“反思式实验设计”；LLM 已具备
+  轻量反思与实验笔记，但行动空间仍限于模型/缩放/超参；
 - 依赖声明采用 `>=` 下限，全新环境会随时间解析到更新版本，需定期回归；
 - 后续可扩展方向：自动生成并迭代“特征工程/数据处理代码”而不仅是模型参数、
   多 run 取均值汇报、断点恢复。
