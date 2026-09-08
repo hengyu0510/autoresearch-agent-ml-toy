@@ -41,7 +41,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     params = t.load_params(args.params, t.DEFAULT_PARAMS)
-    train_df = t.load_data(args.data_path)
+    feature_ops = t.validate_feature_ops(params.get("feature_ops") or [])
+    train_df = t.load_data(args.data_path, feature_ops)
     y_train = train_df["count"].to_numpy(dtype=float)
     X_train = train_df.drop(columns=["count"])
 
@@ -51,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     if "count" in test_raw.columns:
         test_raw = test_raw.drop(columns=["count"])
     # make_features 保持原始行顺序，避免 sort_values 后与 datetime 输出错位。
-    X_test = t.make_features(test_raw)
+    X_test = t.make_features(test_raw, feature_ops)
     if len(test_raw) != len(X_test):
         raise ValueError("test 特征行数与原始 test.csv 不一致")
 
@@ -75,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": params["model"],
         "scaler": scaler,
         "hyperparams": params["hyperparams"],
+        "feature_ops": feature_ops,
         "seed": args.seed,
         "n_train": int(len(X_train)),
         "n_test": int(len(X_test)),

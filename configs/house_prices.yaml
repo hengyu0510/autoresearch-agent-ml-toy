@@ -40,6 +40,17 @@ task:
         scaler: true
         hyperparams:
           alpha: 0.1
+  feature_ops:
+    - id: add_total_sf
+      description: TotalSF = TotalBsmtSF + 1stFlrSF + 2ndFlrSF
+    - id: add_total_bath
+      description: 主/半卫浴数量合计（含地下室）
+    - id: add_has_pool
+      description: 是否有泳池（PoolArea > 0）
+    - id: add_has_garage
+      description: 是否有车库（GarageCars/GarageArea > 0）
+    - id: add_house_age
+      description: 售出时房龄 = YrSold - YearBuilt
 brain:
   type: rule
   provider: openai

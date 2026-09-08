@@ -41,10 +41,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     params = t.load_params(args.params, t.DEFAULT_PARAMS)
-    X_train, y_train = t.load_data(args.data_path)
+    feature_ops = t.validate_feature_ops(params.get("feature_ops") or [])
+    X_train, y_train = t.load_data(args.data_path, feature_ops)
 
     test_path = Path(args.test_path or PROJECT_ROOT / "data" / "raw" / "house_prices" / "test.csv")
-    test_raw = pd.read_csv(test_path)
+    test_raw = t.derive_features(pd.read_csv(test_path), feature_ops)
     X_test = test_raw.drop(columns=["Id"])
     if "SalePrice" in X_test.columns:
         X_test = X_test.drop(columns=["SalePrice"])
@@ -70,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": params["model"],
         "scaler": scaler,
         "hyperparams": params["hyperparams"],
+        "feature_ops": feature_ops,
         "seed": args.seed,
         "n_train": int(len(X_train)),
         "n_test": int(len(X_test)),

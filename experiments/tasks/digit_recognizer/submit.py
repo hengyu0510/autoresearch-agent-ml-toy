@@ -42,10 +42,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     params = t.load_params(args.params, t.DEFAULT_PARAMS)
+    feature_ops = t.validate_feature_ops(params.get("feature_ops") or [])
 
     # 提交模式始终使用全部训练数据，不使用 baseline 里的 max_rows 采样。
     X_train, y_train, n_train = t.load_data(args.data_path, None, seed=args.seed)
     X_train = X_train.astype(np.float32) / 255.0
+    X_train = t.apply_pixel_ops(X_train, feature_ops)
 
     test_path = Path(args.test_path or PROJECT_ROOT / "data" / "raw" / "digit_recognizer" / "test.csv")
     test_raw = pd.read_csv(test_path)
@@ -56,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         image_ids = np.arange(1, len(test_raw) + 1)
     X_test = test_raw.to_numpy(dtype=np.uint8)
     X_test = X_test.astype(np.float32) / 255.0
+    X_test = t.apply_pixel_ops(X_test, feature_ops)
     if len(image_ids) != len(X_test):
         raise ValueError("ImageId 行数与像素矩阵不一致")
 
@@ -84,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": params["model"],
         "scaler": scaler,
         "hyperparams": params["hyperparams"],
+        "feature_ops": feature_ops,
         "seed": args.seed,
         "n_train": int(n_train),
         "n_test": int(len(X_test)),

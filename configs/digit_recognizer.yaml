@@ -44,6 +44,17 @@ task:
         hyperparams:
           C: 0.1
           max_iter: 1000
+  feature_ops:
+    - id: add_pixel_mean
+      description: 全图平均灰度
+    - id: add_pixel_std
+      description: 全图灰度标准差
+    - id: add_horizontal_symmetry
+      description: 左右翻转差异均值
+    - id: add_vertical_symmetry
+      description: 上下翻转差异均值
+    - id: add_center_density
+      description: 中心区域密度与全图均值之差
 brain:
   type: rule
   provider: openai

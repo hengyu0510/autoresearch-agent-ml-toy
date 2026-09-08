@@ -43,12 +43,64 @@ DEFAULT_PARAMS = {
     "hyperparams": {"alpha": 1.0},
 }
 
+SUPPORTED_FEATURE_OPS = {
+    "add_total_sf",
+    "add_total_bath",
+    "add_has_pool",
+    "add_has_garage",
+    "add_house_age",
+}
 
-def load_data(path: str) -> tuple[pd.DataFrame, np.ndarray]:
+
+def validate_feature_ops(feature_ops: list[str]) -> list[str]:
+    ops = list(feature_ops or [])
+    unknown = [op for op in ops if op not in SUPPORTED_FEATURE_OPS]
+    if unknown:
+        raise ValueError(
+            f"不支持的 house_prices 特征算子: {unknown}；"
+            f"可用: {sorted(SUPPORTED_FEATURE_OPS)}"
+        )
+    return ops
+
+
+def derive_features(
+    df: pd.DataFrame, feature_ops: list[str] | None = None
+) -> pd.DataFrame:
+    """在原始行上应用白名单特征算子（不依赖 Id/target）。"""
+    ops = validate_feature_ops(feature_ops)
+    out = df.copy()
+    for op in ops:
+        if op == "add_total_sf":
+            cols = ["TotalBsmtSF", "1stFlrSF", "2ndFlrSF"]
+            out["TotalSF"] = out[cols].fillna(0).sum(axis=1)
+        elif op == "add_total_bath":
+            out["TotalBath"] = (
+                out["FullBath"].fillna(0)
+                + 0.5 * out["HalfBath"].fillna(0)
+                + out["BsmtFullBath"].fillna(0)
+                + 0.5 * out["BsmtHalfBath"].fillna(0)
+            )
+        elif op == "add_has_pool":
+            out["HasPool"] = (out["PoolArea"].fillna(0) > 0).astype(int)
+        elif op == "add_has_garage":
+            has_cars = out["GarageCars"].fillna(0) > 0
+            has_area = out["GarageArea"].fillna(0) > 0
+            out["HasGarage"] = (has_cars | has_area).astype(int)
+        elif op == "add_house_age":
+            out["HouseAge"] = (
+                out["YrSold"].fillna(out["YearBuilt"])
+                - out["YearBuilt"].fillna(out["YrSold"])
+            )
+    return out
+
+
+def load_data(
+    path: str, feature_ops: list[str] | None = None
+) -> tuple[pd.DataFrame, np.ndarray]:
     p = Path(path) if path else DEFAULT_DATA
     if not p.exists():
         raise FileNotFoundError(f"House Prices 数据不存在: {p}")
-    df = pd.read_csv(p)
+    df = derive_features(pd.read_csv(p), feature_ops)
     if "Id" in df.columns:
         df = df.drop(columns=["Id"])
     y = df["SalePrice"].to_numpy(dtype=float)
@@ -131,8 +183,9 @@ def main(argv: list[str] | None = None) -> int:
     add_common_args(parser)
     args = parser.parse_args(argv)
     params = load_params(args.params, DEFAULT_PARAMS)
+    feature_ops = validate_feature_ops(params.get("feature_ops") or [])
 
-    X, y = load_data(args.data_path)
+    X, y = load_data(args.data_path, feature_ops)
     tr, va, te = split_index(
         len(X), seed=args.seed,
         val_size=args.val_size, test_size=args.test_size,
@@ -162,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": params["model"],
         "scaler": scaler,
         "hyperparams": params["hyperparams"],
+        "feature_ops": feature_ops,
         "seed": args.seed,
         "n_train": int(len(tr)),
         "n_val": int(len(va)),

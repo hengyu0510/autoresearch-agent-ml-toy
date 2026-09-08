@@ -44,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     params = t.load_params(args.params, t.DEFAULT_PARAMS)
+    feature_ops = t.validate_feature_ops(params.get("feature_ops") or [])
     images, labels = t.load_data(args.data_path, max_rows=None)
     n_coords = labels.shape[1]
 
@@ -57,8 +58,12 @@ def main(argv: list[str] | None = None) -> int:
     if list(test_df["ImageId"]) != list(range(1, len(test_df) + 1)):
         raise ValueError("test.csv 的 ImageId 必须为 1..N 顺序")
 
-    X_train = images.astype(np.float32) / 255.0
-    X_test = test_images.astype(np.float32) / 255.0
+    X_train = t.apply_pixel_ops(
+        images.astype(np.float32) / 255.0, feature_ops
+    )
+    X_test = t.apply_pixel_ops(
+        test_images.astype(np.float32) / 255.0, feature_ops
+    )
     pca = PCA(
         n_components=int(params.get("pca_components", 64)),
         svd_solver="randomized",
@@ -112,6 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         "scaler": scaler,
         "pca_components": int(pca.components_.shape[0]),
         "hyperparams": params["hyperparams"],
+        "feature_ops": feature_ops,
         "seed": args.seed,
         "n_train": int(len(images)),
         "n_test": int(len(test_images)),

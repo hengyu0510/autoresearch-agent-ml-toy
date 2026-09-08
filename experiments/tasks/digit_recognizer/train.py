@@ -42,6 +42,52 @@ DEFAULT_PARAMS = {
     "hyperparams": {"C": 1.0, "max_iter": 1000},
 }
 
+SUPPORTED_FEATURE_OPS = {
+    "add_pixel_mean",
+    "add_pixel_std",
+    "add_horizontal_symmetry",
+    "add_vertical_symmetry",
+    "add_center_density",
+}
+
+
+def validate_feature_ops(feature_ops: list[str]) -> list[str]:
+    ops = list(feature_ops or [])
+    unknown = [op for op in ops if op not in SUPPORTED_FEATURE_OPS]
+    if unknown:
+        raise ValueError(
+            f"不支持的 digit_recognizer 特征算子: {unknown}；"
+            f"可用: {sorted(SUPPORTED_FEATURE_OPS)}"
+        )
+    return ops
+
+
+def apply_pixel_ops(X: np.ndarray, feature_ops: list[str]) -> np.ndarray:
+    """在 [0,1] 像素矩阵上追加白名单全局/对称特征。"""
+    ops = validate_feature_ops(feature_ops)
+    if not ops:
+        return X
+    side = int(round(X.shape[1] ** 0.5))
+    if side * side != X.shape[1]:
+        raise ValueError(f"像素数不是完全平方: {X.shape[1]}")
+    img = X.reshape(X.shape[0], side, side).astype(np.float32)
+    extras: list[np.ndarray] = []
+    for op in ops:
+        if op == "add_pixel_mean":
+            extras.append(img.mean(axis=(1, 2)))
+        elif op == "add_pixel_std":
+            extras.append(img.std(axis=(1, 2)))
+        elif op == "add_horizontal_symmetry":
+            extras.append(np.abs(img - img[:, :, ::-1]).mean(axis=(1, 2)))
+        elif op == "add_vertical_symmetry":
+            extras.append(np.abs(img - img[:, ::-1, :]).mean(axis=(1, 2)))
+        elif op == "add_center_density":
+            h0, h1 = side // 4, side - side // 4
+            center_mean = img[:, h0:h1, h0:h1].mean(axis=(1, 2))
+            extras.append(center_mean - img.mean(axis=(1, 2)))
+    extra = np.stack(extras, axis=1).astype(np.float32)
+    return np.concatenate([X.astype(np.float32), extra], axis=1)
+
 
 def load_data(path: str, max_rows: int | None, seed: int):
     p = Path(path) if path else DEFAULT_DATA
@@ -90,11 +136,14 @@ def main(argv: list[str] | None = None) -> int:
     add_common_args(parser)
     args = parser.parse_args(argv)
     params = load_params(args.params, DEFAULT_PARAMS)
+    feature_ops = validate_feature_ops(params.get("feature_ops") or [])
 
     max_rows = params.get("max_rows")
     X, y, n_loaded = load_data(args.data_path, max_rows, seed=args.seed)
     X = X.astype(np.float32) / 255.0
-    print(f"[train] digit_recognizer: 已加载 n={n_loaded}（pixel 784 维）")
+    X = apply_pixel_ops(X, feature_ops)
+    print(f"[train] digit_recognizer: 已加载 n={n_loaded}，"
+          f"features={X.shape[1]}（含 feature_ops={feature_ops}）")
 
     tr, va, te = split_index(
         len(X), seed=args.seed,
@@ -128,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": params["model"],
         "scaler": scaler,
         "hyperparams": params["hyperparams"],
+        "feature_ops": feature_ops,
         "seed": args.seed,
         "max_rows": max_rows,
         "n_loaded": int(n_loaded),

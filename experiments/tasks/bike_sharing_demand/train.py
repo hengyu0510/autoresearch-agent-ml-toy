@@ -49,25 +49,64 @@ DEFAULT_PARAMS = {
 }
 
 DROP_COLS = ["datetime", "casual", "registered"]
+SUPPORTED_FEATURE_OPS = {
+    "add_is_working_day",
+    "add_is_peak_hour",
+    "add_day_period",
+    "add_bad_weather",
+}
 
 
-def make_features(df: pd.DataFrame) -> pd.DataFrame:
+def validate_feature_ops(feature_ops: list[str]) -> list[str]:
+    ops = list(feature_ops or [])
+    unknown = [op for op in ops if op not in SUPPORTED_FEATURE_OPS]
+    if unknown:
+        raise ValueError(
+            f"不支持的 bike_sharing_demand 特征算子: {unknown}；"
+            f"可用: {sorted(SUPPORTED_FEATURE_OPS)}"
+        )
+    return ops
+
+
+def make_features(
+    df: pd.DataFrame, feature_ops: list[str] | None = None
+) -> pd.DataFrame:
     """由原始行（保留顺序）派生 hour/weekday/month 并移除泄漏/标识列。"""
+    ops = validate_feature_ops(feature_ops)
     parsed = pd.to_datetime(df["datetime"])
     out = df.copy()
     out["hour"] = parsed.dt.hour
     out["weekday"] = parsed.dt.weekday
     out["month"] = parsed.dt.month
+    for op in ops:
+        if op == "add_is_working_day":
+            holiday = pd.to_numeric(out["holiday"], errors="coerce").fillna(0)
+            out["IsWorkingDay"] = (
+                (out["weekday"] < 5) & (holiday == 0)
+            ).astype(int)
+        elif op == "add_is_peak_hour":
+            out["IsPeakHour"] = out["hour"].isin([7, 8, 9, 17, 18, 19]).astype(int)
+        elif op == "add_day_period":
+            out["DayPeriod"] = pd.cut(
+                out["hour"],
+                bins=[-1, 5, 11, 17, 23],
+                labels=["Night", "Morning", "Afternoon", "Evening"],
+            ).astype(str)
+        elif op == "add_bad_weather":
+            weather = pd.to_numeric(out["weather"], errors="coerce").fillna(1)
+            out["BadWeather"] = (weather >= 3).astype(int)
     return out.drop(columns=[c for c in DROP_COLS if c in out.columns])
 
 
-def load_data(path: str) -> pd.DataFrame:
+def load_data(
+    path: str, feature_ops: list[str] | None = None
+) -> pd.DataFrame:
     p = Path(path) if path else DEFAULT_DATA
     if not p.exists():
         raise FileNotFoundError(f"Bike Sharing 数据不存在: {p}")
     df = pd.read_csv(p, parse_dates=["datetime"])
     df = df.sort_values("datetime").reset_index(drop=True)
-    return make_features(df)
+    return make_features(df, feature_ops)
 
 
 def make_preprocessor(X: pd.DataFrame, scaler: bool) -> ColumnTransformer:
@@ -157,8 +196,9 @@ def main(argv: list[str] | None = None) -> int:
     add_common_args(parser)
     args = parser.parse_args(argv)
     params = load_params(args.params, DEFAULT_PARAMS)
+    feature_ops = validate_feature_ops(params.get("feature_ops") or [])
 
-    df = load_data(args.data_path)
+    df = load_data(args.data_path, feature_ops)
     y = df["count"].to_numpy(dtype=float)
     X = df.drop(columns=["count"])
     tr, va, te = chronological_split(
@@ -189,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": params["model"],
         "scaler": scaler,
         "hyperparams": params["hyperparams"],
+        "feature_ops": feature_ops,
         "seed": args.seed,
         "n_train": int(len(tr)),
         "n_val": int(len(va)),

@@ -42,6 +42,15 @@ task:
           hidden_layer_sizes: [64, 32]
           alpha: 0.0001
           max_iter: 1000
+  feature_ops:
+    - id: add_is_working_day
+      description: 工作日且非节假日
+    - id: add_is_peak_hour
+      description: 早晚高峰时段（7-9 / 17-19 点）
+    - id: add_day_period
+      description: 把小时归为 Night/Morning/Afternoon/Evening
+    - id: add_bad_weather
+      description: 天气等级 >= 3 视为恶劣天气
 brain:
   type: rule
   provider: openai
