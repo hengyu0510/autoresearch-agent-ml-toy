@@ -145,6 +145,41 @@ runs/<task_id>/<timestamp>/
 
 根目录 `config.yaml`（乳腺癌示例）的产物写 `runs/<timestamp>/`。
 
+## 断点续跑（--resume）
+
+每个 run 在“完成一个 step”后都会写 `runs/<task_id>/<timestamp>/checkpoint.json`。
+`--resume` 会读取该文件并恢复：下一步序号、成功轮数、连续失败计数、最佳指标与
+最佳参数、上一轮指标、收敛历史，以及 rule / LLM fallback 大脑的候选游标。
+
+```bash
+# 单任务：自动恢复该 config 对应 runs 下的最新 run
+python run_agent.py --config configs/titanic.yaml --resume
+
+# 单任务：指定具体 run
+python run_agent.py --config configs/titanic.yaml \
+    --resume runs/titanic/20260908_200338
+
+# 批量：每个任务各自续跑最新 run（可先 --dry-run 预览）
+python run_all.py --resume --brain llm --max-steps 6
+python run_all.py --dry-run --resume
+```
+
+行为边界：
+
+- checkpoint 只在 step 完成后落盘；若进程在实验执行中途被杀，续跑会从最近
+  一个“已完成 step”开始，把中断的那个 step 重新执行一次，更早结果不丢失；
+- 旧 run（无 checkpoint）会尽力从 `state.jsonl` 重建：恢复成功轮数、最佳参数
+  与 rule 游标；收敛历史近似为空，后续按新一轮收敛判断；
+- 已正常完成的 run 会拒绝 `--resume`（直接返回 0），避免覆盖结论；如需继续
+  探索，请删除/改名 `summary.json` 后用新的 `--max-steps` 续跑；
+- `run_all --resume` 下若某任务的最新 run 已完成，run_agent 会无操作返回，
+  run_all 沿用其最近一次 summary，不会把整批误报为失败；
+- 续跑时 config 文件路径和 `brain.type` 必须与原 run 一致，否则拒绝；建议保持
+  seed/数据/训练脚本不变，可通过命令行提高 `--max-steps`/`--min-iterations`
+  或修复环境后重试；
+- `checkpoint.json` 属于 `runs/`（gitignore），不入库；共享/迁移 run 目录需
+  连同 `state.jsonl`、`snapshots/`、`metrics/` 一起移动。
+
 ## 目录结构
 
 ```text
@@ -156,7 +191,7 @@ Autoresearch-agent-ml/
 ├── configs/<task_id>.yaml # 5 个 Kaggle 任务的 Agent 配置
 ├── run_agent.py           # 单任务主入口
 ├── run_all.py             # 一键批量入口（可选：全部/部分任务顺序运行）
-├── agent/                 # config / logger / state / planner / executor / evaluator
+├── agent/                 # config / logger / state / planner / executor / evaluator / resume
 ├── data/                  # fetch.py + kaggle_upload.py + raw/ + archives/
 ├── tasks/                 # tasks.yaml + registry.py
 ├── experiments/
@@ -166,7 +201,7 @@ Autoresearch-agent-ml/
 │   └── tasks/<task_id>/   # train.py + baseline.yaml + submit.py
 ├── submissions/           # Kaggle 提交文件 + 最佳参数 YAML（可重生成）
 ├── runs/                  # 运行产物（gitignore）
-│   └── <task_id>/<timestamp>/submissions/best_submission.csv  # 自动提交产物
+│   └── <task_id>/<timestamp>/   # state.jsonl + checkpoint.json + snapshots + 自动提交产物
 └── reports/               # technical_report.md + example_runs/（已入库的完整运行日志）
 ```
 
@@ -215,8 +250,10 @@ brain:
 
 - `--brain llm` 会在 CLI 覆盖后重新读取 `.env`，因此模型/端点/effort 均生效；
 - LLM 空响应或 JSON 截断会自动重试一次，仍失败才回退 rule；
-- LLM 提出的旧版超参（如 `max_features: auto`）会被
-  `experiments/common.sanitize_model_params` 清洗。
+- LLM 返回的 params 会先在 planner 层做程序级校验：模型必须在白名单内、未知
+  顶层字段自动忽略、scaler/hyperparams/任务级字段做类型与边界清洗；非法模型
+  或越界超参会被拒绝并回退 rule；
+- 旧版超参（如 `max_features: auto`）会统一清洗为 sklearn 可用取值。
 
 ## LLM 实测结果（2026-09-07，每任务 3 轮）
 

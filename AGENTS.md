@@ -32,12 +32,32 @@
 | 可复现性 | 单任务：`python run_agent.py --config configs/<task_id>.yaml --brain rule|llm --max-steps 3`；全局最佳参数提交为 `submissions/best_<task_id>_params.yaml`，示例完整运行入库于 `reports/example_runs/` |
 | 批量入口 | `python run_all.py [--tasks <id,...>] [--brain rule|llm] [--max-steps N]`：数据缺失自动下载，按序运行一个或全部任务，单任务失败不中断，汇总报告写入 `runs/batch/<timestamp>/` |
 
+### 2.1 断点续跑语义
+
+每个 step 真正“完成”（成功采纳/回退、失败已消耗并继续、触发停止或耗尽候选）后，
+run_agent 会把内部状态写入 `runs/<task_id>/<timestamp>/checkpoint.json`：
+
+- 下一步应执行的 `next_step`、成功轮数、连续失败计数；
+- `best_metrics`、`last_metrics`、最佳参数文件路径；
+- 收敛所需的 `previous_value` 与 `improvements` 历史；
+- 决策大脑游标：rule 的候选 index；LLM 场景下其 fallback rule 的 index。
+
+恢复入口与约束：
+
+- `run_agent --resume`（= latest）或 `--resume <run_dir>`；
+- `run_all --resume` 对每个任务续跑其各自最新 run；
+- config 文件路径与 `brain.type` 必须与 checkpoint 一致；
+- 已正常完成（exit_code=0）的 run 拒绝恢复；
+- 旧 run 无 checkpoint 时从 state.jsonl 重建（成功轮数/最佳参数/rule 游标，
+  收敛历史近似重置）。
+
 ## 3. 工作约定
 
 1. **真实执行**：所有"运行/修改"必须是真实工具调用（文件读写、Python / Shell
    执行），禁止仅在对话中声称已运行。
 2. **先读后改**：动手前阅读 `init.md`、本文件与现有代码；不破坏 `init.md`。
 3. **状态先行**：每步修改或实验先写状态，出错先记录 traceback 再修复/回退。
+   每个已完成 step 必须同步更新 checkpoint.json，保证任意时刻被杀都可恢复；
 4. **独立验证**：检查进程退出码、输出文件与指标合理性；每轮加入反思，不以
    训练集指标下结论。
 5. **小步有据**：每轮基于明确假设或上轮结论，避免盲目反复调参。
@@ -60,7 +80,7 @@ Autoresearch-agent-ml/
 ├── configs/<task_id>.yaml # 5 个 Kaggle 任务的 Agent 配置
 ├── run_agent.py           # 单任务主入口
 ├── run_all.py             # 一键批量入口（可选：全部/部分任务顺序运行）
-├── agent/                 # 框架核心（config/logger/state/planner/executor/evaluator）
+├── agent/                 # config/logger/state/planner/executor/evaluator/resume
 ├── data/
 │   ├── fetch.py           # Kaggle 下载与缓存
 │   ├── kaggle_upload.py   # 可选的 Kaggle CLI 提交上传
