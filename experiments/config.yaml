@@ -1,0 +1,6 @@
+# 实验初始配置（rule 大脑第 1 轮即使用该 baseline）
+model: logistic_regression
+scaler: false
+hyperparams:
+  C: 1.0
+  max_iter: 2000

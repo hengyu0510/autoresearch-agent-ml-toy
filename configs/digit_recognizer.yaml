@@ -1,0 +1,67 @@
+task:
+  description: >-
+    Digit Recognizer (MNIST) 手写数字识别：优化验证集 Accuracy，
+    决策只看 val，最终在固定测试集上报告 test_acc。
+  dir: experiments
+  train_script: experiments/tasks/digit_recognizer/train.py
+  data_path: data/raw/digit_recognizer/train.csv
+  submit_script: experiments/tasks/digit_recognizer/submit.py
+  sample_submission: data/raw/digit_recognizer/sample_submission.csv
+  submission_id_col: ImageId
+  submission_required_cols: ImageId,Label
+  seed: 42
+  split:
+    train: 0.6
+    val: 0.2
+    test: 0.2
+  rule_candidates:
+    - description: 尝试 MLP（128 隐单元，最大迭代 100）
+      rationale: 全连接网络是 MNIST 像素分类的常见强 baseline。
+      params:
+        model: mlp
+        scaler: true
+        max_rows: 20000
+        hyperparams:
+          hidden_layer_sizes: [128]
+          alpha: 0.0001
+          max_iter: 100
+    - description: 尝试更宽 MLP（256 隐单元，最大迭代 100）
+      rationale: 增加容量验证是否仍有提升空间。
+      params:
+        model: mlp
+        scaler: true
+        max_rows: 20000
+        hyperparams:
+          hidden_layer_sizes: [256]
+          alpha: 0.0001
+          max_iter: 100
+    - description: 线性模型微调（C=0.1）
+      rationale: 调整正则强度作为稳健对照。
+      params:
+        model: logistic_regression
+        scaler: false
+        max_rows: 20000
+        hyperparams:
+          C: 0.1
+          max_iter: 1000
+brain:
+  type: rule
+  provider: openai
+  model: ""
+  base_url: ""
+  api_key_env: DEEPSEEK_API_KEY
+  temperature: 0.2
+  max_tokens: 32768
+  fallback_to_rule: true
+run:
+  runs_root: runs/digit_recognizer
+  max_steps: 6
+  min_iterations: 3
+  target_metric: val_acc
+  higher_is_better: true
+  improve_min: 0.003
+  convergence_rounds: 2
+  success_threshold: null
+  max_consecutive_errors: 2
+  max_attempts_per_step: 2
+  timeout_seconds: 600

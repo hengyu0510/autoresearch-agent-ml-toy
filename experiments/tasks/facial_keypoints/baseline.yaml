@@ -1,0 +1,6 @@
+model: ridge
+scaler: true
+pca_components: 64
+max_rows: null
+hyperparams:
+  alpha: 1.0

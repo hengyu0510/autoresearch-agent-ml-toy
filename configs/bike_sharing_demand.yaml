@@ -1,0 +1,65 @@
+task:
+  description: >-
+    Bike Sharing Demand 租赁量预测：按时间顺序划分 train/val/test，
+    优化验证集 RMSLE（越低越好），决策只看 val。
+  dir: experiments
+  train_script: experiments/tasks/bike_sharing_demand/train.py
+  data_path: data/raw/bike_sharing_demand/train.csv
+  submit_script: experiments/tasks/bike_sharing_demand/submit.py
+  sample_submission: data/raw/bike_sharing_demand/sampleSubmission.csv
+  submission_id_col: datetime
+  submission_required_cols: datetime,count
+  seed: 42
+  split:
+    train: 0.6
+    val: 0.2
+    test: 0.2
+  rule_candidates:
+    - description: 尝试 XGBoost（500 棵树，深度 6）
+      rationale: boosting 通常优于 RF baseline，进一步降低 RMSLE。
+      params:
+        model: xgboost
+        scaler: false
+        hyperparams:
+          n_estimators: 500
+          max_depth: 6
+          learning_rate: 0.05
+    - description: 加深 Random Forest（800 棵树，深度 14）
+      rationale: 让树模型拟合更强的时序交互。
+      params:
+        model: random_forest
+        scaler: false
+        hyperparams:
+          n_estimators: 800
+          max_depth: 14
+          min_samples_leaf: 2
+    - description: 尝试 MLP（64-32，标准化特征）
+      rationale: 验证神经网络在时序特征上的表现。
+      params:
+        model: mlp
+        scaler: true
+        hyperparams:
+          hidden_layer_sizes: [64, 32]
+          alpha: 0.0001
+          max_iter: 1000
+brain:
+  type: rule
+  provider: openai
+  model: ""
+  base_url: ""
+  api_key_env: DEEPSEEK_API_KEY
+  temperature: 0.2
+  max_tokens: 32768
+  fallback_to_rule: true
+run:
+  runs_root: runs/bike_sharing_demand
+  max_steps: 6
+  min_iterations: 3
+  target_metric: val_rmsle
+  higher_is_better: false
+  improve_min: 0.005
+  convergence_rounds: 2
+  success_threshold: null
+  max_consecutive_errors: 2
+  max_attempts_per_step: 2
+  timeout_seconds: 300

@@ -1,0 +1,16 @@
+{
+  "task": "bike_sharing_demand",
+  "mode": "submission",
+  "model": "random_forest",
+  "scaler": false,
+  "hyperparams": {
+    "n_estimators": 400,
+    "max_depth": 10,
+    "min_samples_leaf": 2
+  },
+  "seed": 42,
+  "n_train": 10886,
+  "n_test": 6493,
+  "submission": "submissions\\bike_sharing_demand_submission.csv",
+  "generated_at": "2026-09-06T16:42:01"
+}

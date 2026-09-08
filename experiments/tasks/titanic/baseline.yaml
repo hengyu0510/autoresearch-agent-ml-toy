@@ -1,0 +1,5 @@
+model: logistic_regression
+scaler: true
+hyperparams:
+  C: 1.0
+  max_iter: 2000

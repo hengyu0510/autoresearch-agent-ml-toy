@@ -1,0 +1,67 @@
+task:
+  description: >-
+    Facial Keypoints Detection：按可见关键点坐标 cell 聚合的 RMSE（越低越好），
+    决策只看 val，最终在固定测试集上报告 test_rmse。
+  dir: experiments
+  train_script: experiments/tasks/facial_keypoints/train.py
+  data_path: data/raw/facial_keypoints/training.csv
+  submit_script: experiments/tasks/facial_keypoints/submit.py
+  sample_submission: data/raw/facial_keypoints/SampleSubmission.csv
+  submission_id_col: RowId
+  submission_required_cols: RowId,Location
+  seed: 42
+  split:
+    train: 0.6
+    val: 0.2
+    test: 0.2
+  rule_candidates:
+    - description: Ridge 微调（alpha=0.1，PCA 64）
+      rationale: 更强回归（更小正则）检验 baseline 的容量上限。
+      params:
+        model: ridge
+        scaler: true
+        pca_components: 64
+        max_rows: null
+        hyperparams:
+          alpha: 0.1
+    - description: 增加 PCA 维度到 96 后重训 Ridge
+      rationale: 更高维表示可保留更多细节，检验信息是否不足。
+      params:
+        model: ridge
+        scaler: true
+        pca_components: 96
+        max_rows: null
+        hyperparams:
+          alpha: 1.0
+    - description: 尝试小 MLP（64 隐单元）逐坐标回归
+      rationale: 验证非线性模型能否进一步降低关键点 RMSE。
+      params:
+        model: mlp
+        scaler: true
+        pca_components: 64
+        max_rows: null
+        hyperparams:
+          hidden_layer_sizes: [64]
+          alpha: 0.0001
+          max_iter: 200
+brain:
+  type: rule
+  provider: openai
+  model: ""
+  base_url: ""
+  api_key_env: DEEPSEEK_API_KEY
+  temperature: 0.2
+  max_tokens: 32768
+  fallback_to_rule: true
+run:
+  runs_root: runs/facial_keypoints
+  max_steps: 6
+  min_iterations: 3
+  target_metric: val_rmse
+  higher_is_better: false
+  improve_min: 0.02
+  convergence_rounds: 2
+  success_threshold: null
+  max_consecutive_errors: 2
+  max_attempts_per_step: 2
+  timeout_seconds: 600

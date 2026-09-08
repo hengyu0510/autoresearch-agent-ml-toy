@@ -1,0 +1,14 @@
+{
+  "task": "house_prices",
+  "mode": "submission",
+  "model": "ridge",
+  "scaler": true,
+  "hyperparams": {
+    "alpha": 1.0
+  },
+  "seed": 42,
+  "n_train": 1460,
+  "n_test": 1459,
+  "submission": "submissions\\house_prices_submission.csv",
+  "generated_at": "2026-09-06T16:41:53"
+}

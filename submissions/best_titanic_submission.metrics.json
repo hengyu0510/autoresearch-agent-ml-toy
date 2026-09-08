@@ -1,0 +1,14 @@
+{
+  "task": "titanic",
+  "mode": "submission",
+  "model": "logistic_regression",
+  "scaler": true,
+  "hyperparams": {
+    "C": 0.1
+  },
+  "seed": 42,
+  "n_train": 891,
+  "n_test": 418,
+  "submission": "submissions\\best_titanic_submission.csv",
+  "generated_at": "2026-09-08T10:52:57"
+}

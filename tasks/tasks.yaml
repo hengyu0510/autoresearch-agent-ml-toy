@@ -1,0 +1,51 @@
+# 任务注册表：AutoResearch Agent 的实验任务池
+# source.provider: kaggle_competition | kaggle_dataset | url
+# 说明：大部分 Kaggle 竞赛需先登录并在网页端接受规则（Accept Rules），
+#       数据由 data/fetch.py 下载并缓存到 data/raw/<task_id>/。
+
+- id: facial_keypoints
+  name: Facial Keypoints Detection
+  domain: image_regression
+  metric: rmse
+  source:
+    provider: kaggle_competition
+    slug: facial-keypoints-detection
+  files: [training.csv, test.csv, IdLookupTable.csv, sampleSubmission.csv]
+  notes: 图像关键点回归；灰度像素预测 15 个关键点坐标，标签缺失常见，适合小样本与迁移学习。
+- id: titanic
+  name: Titanic - Machine Learning from Disaster
+  domain: tabular_classification
+  metric: accuracy
+  source:
+    provider: kaggle_competition
+    slug: titanic
+  files: [train.csv, test.csv]
+  notes: 经典入门二分类；单轮秒级，适合闭环冒烟。
+- id: bike_sharing_demand
+  name: Bike Sharing Demand
+  domain: temporal_regression
+  metric: rmsle
+  source:
+    provider: kaggle_competition
+    slug: bike-sharing-demand
+  files: [train.csv, test.csv]
+  notes: 时序/计数回归；casual/registered 泄漏是著名的真实失败案例素材。
+
+- id: digit_recognizer
+  name: Digit Recognizer (MNIST)
+  domain: image_classification
+  metric: accuracy
+  source:
+    provider: kaggle_competition
+    slug: digit-recognizer
+  files: [train.csv, test.csv]
+  notes: 图像分类；普通电脑建议子采样后先跑 PCA/MLP，后续可扩展 CNN。
+- id: house_prices
+  name: House Prices - Advanced Regression Techniques
+  domain: tabular_regression
+  metric: rmsle
+  source:
+    provider: kaggle_competition
+    slug: house-prices-advanced-regression-techniques
+  files: [train.csv, test.csv]
+  notes: 约 80 特征回归；目标偏态、缺失值与异常值是天然失败恢复素材。

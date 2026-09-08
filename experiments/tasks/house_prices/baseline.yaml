@@ -1,0 +1,4 @@
+model: ridge
+scaler: true
+hyperparams:
+  alpha: 1.0

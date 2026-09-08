@@ -1,0 +1,39 @@
+# AutoResearch Agent for ML - 全局配置
+# 所有主要参数（任务、大脑、运行预算）均在此配置，可通过命令行覆盖。
+
+task:
+  description: >-
+    在乳腺癌二分类数据集上构建分类器，以验证集 AUC 为主要优化指标，
+    每轮先读指标再决定继续/回退/停止，最终在测试集上报告结果。
+  dir: experiments
+  train_script: experiments/train.py
+  data_path: ""            # 留空表示使用 sklearn 内置 load_breast_cancer
+  seed: 42
+  split:
+    train: 0.6
+    val: 0.2
+    test: 0.2
+
+brain:
+  type: rule               # rule | llm
+  provider: openai         # openai | anthropic（type=llm 时生效）
+  model: ""                # llm 时使用；可用 OPENAI_MODEL / ANTHROPIC_MODEL 覆盖
+  base_url: ""             # llm 时使用；可用 OPENAI_BASE_URL / ANTHROPIC_BASE_URL 覆盖
+  api_key_env: DEEPSEEK_API_KEY  # DeepSeek 自定义密钥变量（避免与系统 OPENAI_API_KEY 冲突）
+  reasoning_effort: ""     # 可选 low|medium|high|max；留空不传（可用 *_REASONING_EFFORT 覆盖）
+  temperature: 0.2
+  max_tokens: 32768
+  fallback_to_rule: true   # llm 失败时回退到 rule 大脑
+
+run:
+  runs_root: runs
+  max_steps: 12            # 最大动作步数，防止无限循环
+  min_iterations: 3        # 至少完成的真实实验迭代数
+  target_metric: val_auc   # Agent 优化目标
+  improve_min: 0.003       # 单轮提升低于该值的收敛判定
+  convergence_rounds: 2    # 连续 N 轮提升不足则收敛停止
+  success_threshold: null  # 达到目标值可提前停止（null 表示不启用）
+  higher_is_better: true   # 指标越大越好；回归类任务改为 false
+  max_consecutive_errors: 2
+  max_attempts_per_step: 2 # 单步失败后的最大尝试次数
+  timeout_seconds: 300     # 单次实验超时

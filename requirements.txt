@@ -1,0 +1,9 @@
+# AutoResearch Agent for ML
+scikit-learn>=1.4,<2
+numpy>=1.26,<3
+PyYAML>=6.0,<7
+python-dotenv>=1.0,<2
+pandas>=2.0,<4
+xgboost>=2.0,<4
+# Kaggle 1.8.x is required for KGAT tokens; 2.x is incompatible with kagglesdk 0.1.37
+kaggle==1.8.4

@@ -1,0 +1,16 @@
+{
+  "task": "facial_keypoints",
+  "mode": "submission",
+  "model": "ridge",
+  "scaler": true,
+  "pca_components": 96,
+  "hyperparams": {
+    "alpha": 1.0
+  },
+  "seed": 42,
+  "n_train": 7049,
+  "n_test": 1783,
+  "n_lookup": 27124,
+  "submission": "submissions\\best_facial_keypoints_submission.csv",
+  "generated_at": "2026-09-08T10:57:10"
+}

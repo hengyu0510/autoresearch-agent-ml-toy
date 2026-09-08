@@ -1,0 +1,63 @@
+task:
+  description: >-
+    House Prices 房价回归：优化验证集 RMSLE（越低越好），
+    决策只看 val，最终在固定测试集上报告 test_rmsle。
+  dir: experiments
+  train_script: experiments/tasks/house_prices/train.py
+  data_path: data/raw/house_prices/train.csv
+  submit_script: experiments/tasks/house_prices/submit.py
+  sample_submission: data/raw/house_prices/sample_submission.csv
+  submission_id_col: Id
+  submission_required_cols: Id,SalePrice
+  seed: 42
+  split:
+    train: 0.6
+    val: 0.2
+    test: 0.2
+  rule_candidates:
+    - description: 尝试 XGBoost 回归（500 棵树，深度 5）
+      rationale: 树提升通常优于线性 baseline，适合表格回归。
+      params:
+        model: xgboost
+        scaler: false
+        hyperparams:
+          n_estimators: 500
+          max_depth: 5
+          learning_rate: 0.05
+    - description: 尝试 Random Forest（500 棵树，深度 12）
+      rationale: 与 XGBoost 对照，观察 bagging 与 boosting 的差异。
+      params:
+        model: random_forest
+        scaler: false
+        hyperparams:
+          n_estimators: 500
+          max_depth: 12
+          min_samples_leaf: 2
+    - description: Ridge 正则微调（alpha=0.1，标准化）
+      rationale: 更强的线性模型作为稳健对照。
+      params:
+        model: ridge
+        scaler: true
+        hyperparams:
+          alpha: 0.1
+brain:
+  type: rule
+  provider: openai
+  model: ""
+  base_url: ""
+  api_key_env: DEEPSEEK_API_KEY
+  temperature: 0.2
+  max_tokens: 32768
+  fallback_to_rule: true
+run:
+  runs_root: runs/house_prices
+  max_steps: 6
+  min_iterations: 3
+  target_metric: val_rmsle
+  higher_is_better: false
+  improve_min: 0.002
+  convergence_rounds: 2
+  success_threshold: null
+  max_consecutive_errors: 2
+  max_attempts_per_step: 2
+  timeout_seconds: 300

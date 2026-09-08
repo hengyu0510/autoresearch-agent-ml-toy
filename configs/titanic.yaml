@@ -1,0 +1,64 @@
+task:
+  description: >-
+    Titanic 生存预测：在固定 train/val/test 划分上优化验证集 Accuracy，
+    决策只看 val，最终在测试集上报告结果，避免只凭训练集指标下结论。
+  dir: experiments
+  train_script: experiments/tasks/titanic/train.py
+  data_path: data/raw/titanic/train.csv
+  submit_script: experiments/tasks/titanic/submit.py
+  sample_submission: data/raw/titanic/gender_submission.csv
+  submission_id_col: PassengerId
+  submission_required_cols: PassengerId,Survived
+  seed: 42
+  split:
+    train: 0.6
+    val: 0.2
+    test: 0.2
+  rule_candidates:
+    - description: 尝试 Random Forest（500 棵树，限制深度）
+      rationale: 树模型可捕捉非线性交互，作为 logistic baseline 的对照。
+      params:
+        model: random_forest
+        scaler: false
+        hyperparams:
+          n_estimators: 500
+          max_depth: 5
+          min_samples_leaf: 3
+    - description: 尝试小 MLP（标准化特征，16 隐单元）
+      rationale: 验证简单神经网络在少量表格特征上是否稳健。
+      params:
+        model: mlp
+        scaler: true
+        hyperparams:
+          hidden_layer_sizes: [16]
+          alpha: 0.001
+          max_iter: 2000
+    - description: 线性模型微调（C=0.5，不缩放）
+      rationale: 以不同正则强度对照 logistic 的缩放敏感性。
+      params:
+        model: logistic_regression
+        scaler: false
+        hyperparams:
+          C: 0.5
+          max_iter: 2000
+brain:
+  type: rule
+  provider: openai
+  model: ""
+  base_url: ""
+  api_key_env: DEEPSEEK_API_KEY
+  temperature: 0.2
+  max_tokens: 32768
+  fallback_to_rule: true
+run:
+  runs_root: runs/titanic
+  max_steps: 6
+  min_iterations: 3
+  target_metric: val_acc
+  higher_is_better: true
+  improve_min: 0.003
+  convergence_rounds: 2
+  success_threshold: null
+  max_consecutive_errors: 2
+  max_attempts_per_step: 2
+  timeout_seconds: 120
