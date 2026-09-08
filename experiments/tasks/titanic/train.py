@@ -11,6 +11,7 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
@@ -42,22 +43,73 @@ DEFAULT_PARAMS = {
     "hyperparams": {"C": 1.0, "max_iter": 2000},
 }
 
-NUMERIC_COLS = ["Age", "Fare", "SibSp", "Parch", "Pclass"]
-CATEGORICAL_COLS = ["Sex", "Embarked", "CabinLetter"]
 DROP_COLS = ["PassengerId", "Name", "Ticket", "Cabin"]
+SUPPORTED_FEATURE_OPS = {
+    "add_family_size",
+    "add_is_alone",
+    "add_title",
+    "add_fare_log",
+}
 
 
-def load_data(path: str) -> pd.DataFrame:
+def validate_feature_ops(feature_ops: list[str]) -> list[str]:
+    ops = list(feature_ops or [])
+    unknown = [op for op in ops if op not in SUPPORTED_FEATURE_OPS]
+    if unknown:
+        raise ValueError(
+            f"不支持的 titanic 特征算子: {unknown}；"
+            f"可用: {sorted(SUPPORTED_FEATURE_OPS)}"
+        )
+    return ops
+
+
+def load_data(path: str, feature_ops: list[str] | None = None) -> pd.DataFrame:
     p = Path(path) if path else DEFAULT_DATA
     if not p.exists():
         raise FileNotFoundError(f"Titanic 数据不存在: {p}")
+    ops = validate_feature_ops(feature_ops)
     df = pd.read_csv(p)
     df["CabinLetter"] = df["Cabin"].fillna("None").str[0]
+    for op in ops:
+        if op in ("add_family_size", "add_is_alone"):
+            df["FamilySize"] = (
+                df["SibSp"].fillna(0).astype(int)
+                + df["Parch"].fillna(0).astype(int)
+                + 1
+            )
+        if op == "add_is_alone":
+            df["IsAlone"] = (df["FamilySize"] == 1).astype(int)
+            if "add_family_size" not in ops:
+                df = df.drop(columns=["FamilySize"])
+        elif op == "add_family_size":
+            # FamilySize 已生成，保留该列
+            pass
+        elif op == "add_title":
+            title = (
+                df["Name"]
+                .str.extract(r",\s*([^\.]+)\.", expand=False)
+                .str.strip()
+            )
+            title = title.map(
+                lambda x: x if x in ("Mr", "Mrs", "Miss", "Master") else "Rare"
+            )
+            df["Title"] = title.fillna("Rare")
+        elif op == "add_fare_log":
+            fare = pd.to_numeric(df["Fare"], errors="coerce").fillna(0)
+            df["FareLog"] = np.log1p(np.maximum(fare, 0))
     drop = [c for c in DROP_COLS if c in df.columns]
     return df.drop(columns=drop)
 
 
-def make_preprocessor(scaler: bool) -> ColumnTransformer:
+def make_preprocessor(X: pd.DataFrame, scaler: bool) -> ColumnTransformer:
+    numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+    categorical_cols = X.select_dtypes(
+        exclude=[np.number]
+    ).columns.tolist()
+    if not numeric_cols:
+        raise ValueError("titanic 特征中没有数值列")
+    if not categorical_cols:
+        raise ValueError("titanic 特征中没有类别列")
     numeric_transformer = Pipeline(
         [
             ("imputer", SimpleImputer(strategy="median")),
@@ -72,8 +124,8 @@ def make_preprocessor(scaler: bool) -> ColumnTransformer:
     )
     return ColumnTransformer(
         [
-            ("num", numeric_transformer, NUMERIC_COLS),
-            ("cat", categorical_transformer, CATEGORICAL_COLS),
+            ("num", numeric_transformer, numeric_cols),
+            ("cat", categorical_transformer, categorical_cols),
         ]
     )
 
@@ -115,8 +167,9 @@ def main(argv: list[str] | None = None) -> int:
     add_common_args(parser)
     args = parser.parse_args(argv)
     params = load_params(args.params, DEFAULT_PARAMS)
+    feature_ops = validate_feature_ops(params.get("feature_ops") or [])
 
-    df = load_data(args.data_path)
+    df = load_data(args.data_path, feature_ops)
     y = df["Survived"].to_numpy(dtype=int)
     X = df.drop(columns=["Survived"])
 
@@ -132,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     scaler = bool(params.get("scaler", True))
     model = build_model(params["model"], params["hyperparams"], seed=args.seed)
     pipe = Pipeline(
-        [("pre", make_preprocessor(scaler)), ("model", model)]
+        [("pre", make_preprocessor(X_tr, scaler)), ("model", model)]
     )
     started = time.perf_counter()
     pipe.fit(X_tr, y_tr)
@@ -148,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": params["model"],
         "scaler": scaler,
         "hyperparams": params["hyperparams"],
+        "feature_ops": feature_ops,
         "seed": args.seed,
         "n_train": int(len(tr)),
         "n_val": int(len(va)),

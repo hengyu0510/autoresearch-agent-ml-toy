@@ -226,12 +226,28 @@ class LLMBrain:
             names = ["logistic_regression", "random_forest", "mlp"]
         return names
 
+    def _allowed_feature_ops(self) -> list[str]:
+        return [
+            str(item.get("id"))
+            for item in self.cfg.experiment.feature_ops or []
+            if item.get("id")
+        ]
+
+    def _feature_op_descriptions(self) -> list[str]:
+        return [
+            f"{item.get('id')}（{item.get('description', '')}）"
+            for item in self.cfg.experiment.feature_ops or []
+            if item.get("id")
+        ]
+
     def _allowed_top_level_keys(self) -> set[str]:
         """LLM 可以写哪些顶层 params 字段（model/scaler/hyperparams + 任务示例字段）。"""
         keys = {"model", "scaler", "hyperparams"}
         for cand in self.cfg.experiment.rule_candidates or []:
             params = cand.get("params") or {}
             keys.update(k for k in params if isinstance(k, str))
+        if self._allowed_feature_ops():
+            keys.add("feature_ops")
         return keys
 
     def _sanitize_llm_params(
@@ -247,6 +263,10 @@ class LLMBrain:
             )
 
         allowed_keys = self._allowed_top_level_keys()
+        if "feature_ops" in params and "feature_ops" not in allowed_keys:
+            raise ValueError(
+                "本任务未启用 feature_ops 白名单，请勿在 params 中包含 feature_ops。"
+            )
         stripped = [k for k in params if k not in allowed_keys]
         cleaned = {k: v for k, v in params.items() if k in allowed_keys}
         if stripped:
@@ -293,6 +313,21 @@ class LLMBrain:
             if not 1 <= value <= 2048:
                 raise ValueError(f"pca_components 超出允许范围: {value}")
             cleaned["pca_components"] = value
+        if "feature_ops" in cleaned:
+            raw = cleaned["feature_ops"]
+            if isinstance(raw, str):
+                raw = [part.strip() for part in raw.split(",") if part.strip()]
+            if not isinstance(raw, list) or not all(
+                isinstance(op, str) for op in raw
+            ):
+                raise ValueError(f"feature_ops 必须是字符串数组: {raw!r}")
+            allowed = self._allowed_feature_ops()
+            unknown = [op for op in raw if op not in allowed]
+            if unknown:
+                raise ValueError(
+                    f"feature_ops 含白名单外算子: {unknown}；可用: {allowed}"
+                )
+            cleaned["feature_ops"] = list(dict.fromkeys(raw))
         return cleaned
 
     @staticmethod
@@ -440,6 +475,16 @@ class LLMBrain:
             for e in errors[-3:]
         ) if errors else "（暂无失败记录）"
 
+        feature_ops = self._allowed_feature_ops()
+        feature_txt = (
+            f"本任务支持的可选特征算子："
+            f"{'，'.join(self._feature_op_descriptions())}。"
+            "params.feature_ops 只能从上述列表取子集或 []（不改特征），"
+            "不要输出白名单外的算子。"
+            if feature_ops else
+            "本任务不支持特征算子，params 不要包含 feature_ops。"
+        )
+
         return (
             f"任务：{self.cfg.experiment.description}\n"
             f"当前步数：{len(runs) + 1}\n"
@@ -447,12 +492,14 @@ class LLMBrain:
             f"实验笔记（含结论/待验证假设，已证伪方向不要重复）：\n"
             f"{insight_txt}\n"
             f"最近失败/错误：\n{error_txt}\n"
+            f"{feature_txt}\n"
             f"本任务 train.py 仅支持以下模型名：{self._allowed_models()}\n"
             "params.model 必须取上述列表中的值，不要提出白名单外的新模型。\n"
             "请基于以上状态提出下一步唯一的修改方案，并以 JSON 返回："
             '{"description": str, "rationale": str, '
             '"params": {"model": "<该任务 train.py 支持的模型名>", '
-            '"scaler": bool, "hyperparams": {...}}}。'
+            '"scaler": bool, "hyperparams": {...}, '
+            '"feature_ops": [...]}}。'
             "不要输出 JSON 以外的内容。"
         )
 

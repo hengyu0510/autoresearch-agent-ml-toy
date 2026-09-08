@@ -83,6 +83,9 @@ class ExperimentConfig:
     split_test: float = 0.2
     # rule 大脑的候选方案；为空时使用 planner.py 内置的通用序列。
     rule_candidates: list[dict] = field(default_factory=list)
+    # 任务允许的受控特征算子白名单：[{id, description}, ...]；LLM 只能选择
+    # 这些 id，具体实现位于各任务 train.py / submit.py，Agent 不直接改代码。
+    feature_ops: list[dict] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict) -> "ExperimentConfig":

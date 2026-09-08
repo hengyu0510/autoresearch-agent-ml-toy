@@ -40,16 +40,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     params = t.load_params(args.params, t.DEFAULT_PARAMS)
+    feature_ops = t.validate_feature_ops(params.get("feature_ops") or [])
 
     # 训练集：全量特征 + 目标
-    train_df = t.load_data(args.data_path)
+    train_df = t.load_data(args.data_path, feature_ops)
     y_train = train_df["Survived"].to_numpy(dtype=int)
     X_train = train_df.drop(columns=["Survived"])
 
     # 测试集：原始 PassengerId 用于写出；t.load_data 保留与训练一致的特征列
     test_path = Path(args.test_path or PROJECT_ROOT / "data" / "raw" / "titanic" / "test.csv")
     test_raw = pd.read_csv(test_path)
-    X_test = t.load_data(str(test_path))
+    X_test = t.load_data(str(test_path), feature_ops)
     if "Survived" in X_test.columns:
         X_test = X_test.drop(columns=["Survived"])
     if len(test_raw) != len(X_test):
@@ -57,7 +58,9 @@ def main(argv: list[str] | None = None) -> int:
 
     scaler = bool(params.get("scaler", True))
     model = t.build_model(params["model"], params["hyperparams"], seed=args.seed)
-    pipe = Pipeline([("pre", t.make_preprocessor(scaler)), ("model", model)])
+    pipe = Pipeline(
+        [("pre", t.make_preprocessor(X_train, scaler)), ("model", model)]
+    )
     pipe.fit(X_train, y_train)
 
     pred = pipe.predict(X_test).astype(int)
@@ -76,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": params["model"],
         "scaler": scaler,
         "hyperparams": params["hyperparams"],
+        "feature_ops": feature_ops,
         "seed": args.seed,
         "n_train": int(len(X_train)),
         "n_test": int(len(X_test)),

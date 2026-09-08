@@ -41,6 +41,15 @@ task:
         hyperparams:
           C: 0.5
           max_iter: 2000
+  feature_ops:
+    - id: add_family_size
+      description: FamilySize = SibSp + Parch + 1，捕捉“同行人数”
+    - id: add_is_alone
+      description: 是否独自乘船（FamilySize == 1）
+    - id: add_title
+      description: 从 Name 提取称呼（Mr/Mrs/Miss/Master/Rare），原始列仍会丢弃
+    - id: add_fare_log
+      description: 新增 log1p(Fare) 数值特征，弱化票价长尾
 brain:
   type: rule
   provider: openai
