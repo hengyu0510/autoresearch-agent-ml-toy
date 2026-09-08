@@ -58,8 +58,9 @@ run_agent 会把内部状态写入 `runs/<task_id>/<timestamp>/checkpoint.json`�
 - insight 写入 `state.jsonl` 与 `notebook.md`，随 run/`--resume` 保留；
 - plan 的上下文包含：最近实验及上轮 rationale、最近 insight、最近失败记录；
 - 反思只影响下一轮 plan，不改变 accept/revert/停止逻辑；
-- 反思既能提出模型/缩放/超参假设，也能在启用 `feature_ops` 的任务（当前为
-  titanic）上提出白名单内的特征假设；Agent 不直接改训练/数据处理代码；
+- 反思既能提出模型/缩放/超参假设，也能在启用 `feature_ops` 的任务（5 个
+  Kaggle 任务已全部启用）上提出白名单内的特征假设；Agent 不直接改训练/数据
+  处理代码；
 - `feature_ops` 只允许取 config `task.feature_ops` 中声明的 id，实现位于
   对应任务 train.py/submit.py，越权算子会被 planner 拒绝。
 
@@ -136,7 +137,7 @@ Autoresearch-agent-ml/
 - [x] 反思与实验笔记：LLM 每轮 reflect（diagnosis/conclusion/hypothesis）写
       state + notebook.md；plan prompt 注入历史 rationale/insight/失败记录；
       反思失败走确定性兜底；
-- [x] titanic 受控特征算子：config 声明 feature_ops 白名单，LLM params 可选
+- [x] 5 任务受控特征算子：每个 config 声明 feature_ops 白名单，LLM params 可选
       特征子集；train/submit 只实现白名单算子，越权算子被拒绝；
 - [x] LLM params 程序级白名单与资源/超参边界校验，非白名单字段自动忽略；
 - [x] 提交管线修复：bike/digit 保留原始行序与 ImageId；validator 增加数值/NaN/Inf

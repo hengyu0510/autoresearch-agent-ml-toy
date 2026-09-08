@@ -8,7 +8,7 @@
 > LLM（deepseek-v4-flash, effort=max）在 5 个任务各完成 3 轮真实迭代，
 > rule 大脑完成确定性闭环复现；`reports/technical_report.md` 已整理，
 > 最佳参数与一份完整示例运行已随仓库提交；LLM 大脑已加入每轮反思与
-> 实验笔记；titanic 已启用受控特征算子（见“实验反思与笔记”）。
+> 实验笔记；5 个任务均已启用受控特征算子（见“实验反思与笔记”）。
 
 ## 环境与安装
 
@@ -288,10 +288,20 @@ LLM 大脑在每轮实验评估完成后会追加一次轻量反思调用，返�
   特征假设（见下）；
 - 反思结果是“下一轮计划的参考”，不直接改变终止/采纳/回退逻辑。
 
-### 受控特征算子（Titanic，方式 B）
+### 受控特征算子（5 个任务，方式 B）
 
-Titanic 的 `configs/titanic.yaml` 声明了 `feature_ops` 白名单，LLM 只能从
-其中选子集，不能任意改 train.py：
+每个 `configs/<task_id>.yaml` 都声明了 `feature_ops` 白名单，LLM 只能从
+其中选子集，不能任意改 train.py。各任务当前可用算子：
+
+| 任务 | 可用特征算子 |
+| --- | --- |
+| `titanic` | add_family_size / add_is_alone / add_title / add_fare_log |
+| `house_prices` | add_total_sf / add_total_bath / add_has_pool / add_has_garage / add_house_age |
+| `bike_sharing_demand` | add_is_working_day / add_is_peak_hour / add_day_period / add_bad_weather |
+| `digit_recognizer` | add_pixel_mean / add_pixel_std / add_horizontal_symmetry / add_vertical_symmetry / add_center_density |
+| `facial_keypoints` | add_pixel_mean / add_pixel_std / add_horizontal_symmetry / add_vertical_symmetry / add_center_density |
+
+Titanic 配置示例：
 
 ```yaml
 feature_ops:
@@ -319,9 +329,6 @@ LLM 若基于反思提出“称呼可能很重要”，下一步 params 可以�
 `train.py` 只实现白名单内的算子；Agent 不写代码。这样特征假设可以像超参
 一样被快照、复现、回退和对比。实测 `add_title + add_family_size +
 add_is_alone` 在 logistic 上把 val_acc 从 0.8202 提到 0.8371。
-
-其他 4 个任务暂未启用 `feature_ops`，LLM 在那些任务上仍只做模型/缩放/超参
-修改；启用方式与 titanic 相同。
 
 ## LLM 实测结果（2026-09-07，每任务 3 轮）
 
@@ -397,8 +404,8 @@ Agent 运行失败时会以非零退出码结束（`stop_failure`、0 轮成功�
 - 提交脚本已验证格式；实际上传 Kaggle 需显式 `--kaggle-upload`，老竞赛是否
   仍开放线上提交取决于账号与比赛状态；
 - `rule` 大脑仍是确定性候选序列，无真正"反思式实验设计"；LLM 大脑已具备
-  "轻量反思 + 实验笔记 + titanic 受控特征算子"，但不能在未启用的任务上改特征，
-  更不能任意改代码；
+  "轻量反思 + 实验笔记 + 5 任务受控特征算子"，但只能在白名单内选算子，
+  不能任意改代码；
 - 断点续跑只保证从最近“已完成 step”继续；中断在实验执行中途时，该 step 会
   从方案重跑一次。已正常完成的 run 会拒绝 `--resume`（需新 run 或手动改名
   `summary.json` 后才继续）。旧 run 无 checkpoint 时会尽力从 state.jsonl 恢复；
