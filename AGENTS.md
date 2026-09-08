@@ -29,6 +29,7 @@
 | 可配置项 | 任务与 `rule_candidates`、指标方向、LLM provider/model/base_url/api_key_env/reasoning_effort/max_tokens、运行预算与阈值 |
 | 提交管线 | 每任务 `submit.py` 用全部有标签数据重训并输出 Kaggle 格式文件；run_agent 收尾自动用最佳快照生成提交并调用 `experiments/validate_submission.py` 校验，结果写入 state/summary |
 | 可复现性 | `python run_agent.py --config configs/<task_id>.yaml --brain rule|llm --max-steps 3` |
+| 批量入口 | `python run_all.py [--tasks <id,...>] [--brain rule|llm] [--max-steps N]`：数据缺失自动下载，按序运行一个或全部任务，单任务失败不中断，汇总报告写入 `runs/batch/<timestamp>/` |
 
 ## 3. 工作约定
 
@@ -56,7 +57,8 @@ Autoresearch-agent-ml/
 ├── README.md              # 环境、安装、运行、目录、已知限制
 ├── config.yaml            # 乳腺癌示例的默认配置
 ├── configs/<task_id>.yaml # 5 个 Kaggle 任务的 Agent 配置
-├── run_agent.py           # 唯一主入口
+├── run_agent.py           # 单任务主入口
+├── run_all.py             # 一键批量入口（可选：全部/部分任务顺序运行）
 ├── agent/                 # 框架核心（config/logger/state/planner/executor/evaluator）
 ├── data/
 │   ├── fetch.py           # Kaggle 下载与缓存
@@ -78,6 +80,9 @@ Autoresearch-agent-ml/
 已完成：
 
 - [x] README 提供环境安装到运行的完整命令，单条主命令可复现；
+- [x] `run_all.py` 一键批量入口：数据缺失自动下载 → 逐任务真实迭代 →
+      run_agent 收尾自动提交 → `runs/batch/<timestamp>/BATCH_REPORT.md` 汇总；
+      `--dry-run` 可预览、`--tasks` 可只跑子集、单任务失败不中断整批；
 - [x] 5 个任务在 LLM 大脑下均完成 3 轮真实迭代；rule 大脑在
       titanic/house_prices/bike_sharing_demand 完成 3 轮、在 digit/facial
       完成闭环冒烟；日志与 `state.jsonl`/`summary.json` 可对应；

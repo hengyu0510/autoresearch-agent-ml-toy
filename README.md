@@ -91,6 +91,19 @@ cd Autoresearch-agent-ml
 > 前置条件：Kaggle 账号 + API token（`.env`），并已在网页端接受对应竞赛规则。
 
 ```bash
+# 0) 一键批量运行全部任务（推荐：配置好后的一行主命令）
+#    数据缺失时自动下载 -> 逐个任务真实迭代 -> 收尾自动生成提交
+#    -> 汇总报告写到 runs/batch/<timestamp>/BATCH_REPORT.md
+python run_all.py --brain llm --max-steps 3
+
+# 只跑部分任务 / rule 大脑（无需 API key）
+python run_all.py --tasks titanic,house_prices --brain llm --max-steps 3
+python run_all.py --tasks titanic --brain rule --max-steps 3
+
+# 先预览将要执行的下载与训练命令
+python run_all.py --dry-run
+
+# ---------- 以下为单任务/手动等价命令（run_all.py 会逐个执行） ----------
 # 1) 查看/下载任务数据（需 Kaggle 凭证且已在网页接受规则）
 python -m data.fetch --list
 python -m data.fetch --task titanic --dry-run
