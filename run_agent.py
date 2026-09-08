@@ -7,6 +7,9 @@
 用法：
     python run_agent.py --config config.yaml [--brain rule|llm]
                         [--max-steps N] [--min-iterations N] [--seed N]
+    python run_agent.py --config configs/titanic.yaml --resume        # 恢复最新 run
+    python run_agent.py --config configs/titanic.yaml \
+        --resume runs/titanic/20260908_120000                        # 恢复指定 run
 """
 
 from __future__ import annotations
@@ -26,6 +29,13 @@ from agent.evaluator import Evaluator
 from agent.executor import Executor
 from agent.logger import Logger, configure_stdio
 from agent.planner import build_brain
+from agent.resume import (
+    ResumeState,
+    load_checkpoint,
+    rebuild_from_state,
+    resolve_resume_dir,
+    save_checkpoint,
+)
 from agent.state import RunState
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -46,6 +56,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--kaggle-upload", action="store_true",
         help="本地提交校验通过后，可选调用 Kaggle CLI 实际上传（默认不访问网络）",
+    )
+    parser.add_argument(
+        "--resume", nargs="?", const="latest", default=None,
+        metavar="RUN_DIR|latest",
+        help=(
+            "断点续跑：指定 run 目录，或省略参数自动恢复 config 对应 runs 下"
+            "最新 run。新 run 每个已完成 step 会写 checkpoint.json；旧 run 无"
+            "checkpoint 时尝试从 state.jsonl 重建。"
+        ),
     )
     return parser.parse_args(argv)
 
@@ -140,6 +159,20 @@ def should_stop(
     ):
         return "stop_converged"
     return None
+
+
+def summary_exit_code(summary: dict[str, Any]) -> int:
+    """从 summary 推导进程退出码；兼容无 exit_code 的旧 run。"""
+    if "exit_code" in summary:
+        return int(summary.get("exit_code") or 0)
+    submission = summary.get("submission") or {}
+    if (
+        summary.get("stop_reason") == "stop_failure"
+        or int(summary.get("successful_iterations") or 0) <= 0
+        or submission.get("status") == "failed"
+    ):
+        return 1
+    return 0
 
 
 def run_best_submission(
@@ -320,39 +353,145 @@ def main(argv: list[str] | None = None) -> int:
     cfg = AgentConfig.from_yaml(args.config)
     apply_overrides(cfg, args)
 
-    run_dir = make_run_dir(cfg)
+    resume_dir: Path | None = None
+    resume_state: ResumeState | None = None
+    if args.resume is not None:
+        try:
+            resume_dir = resolve_resume_dir(cfg, args.resume)
+        except Exception as exc:
+            print(f"[error] 无法解析 --resume: {exc}", flush=True)
+            return 2
+        summary_path = resume_dir / "summary.json"
+        if summary_path.exists():
+            try:
+                old_summary = json.loads(
+                    summary_path.read_text(encoding="utf-8")
+                )
+                already_ok = summary_exit_code(old_summary) == 0
+            except Exception:
+                already_ok = False
+            if already_ok:
+                log = Logger(
+                    log_file=resume_dir / "agent.log",
+                    verbose=not args.quiet,
+                )
+                log.info("该 run 已正常完成，无需恢复；如需继续请删除/改名 summary.json")
+                log.close()
+                print(f"[resume] {resume_dir} 已正常完成，无需恢复。", flush=True)
+                return 0
+        checkpoint = load_checkpoint(resume_dir)
+        if checkpoint is not None:
+            if (
+                checkpoint.config_file
+                and Path(checkpoint.config_file).resolve()
+                != Path(args.config).resolve()
+            ):
+                print(
+                    "[error] checkpoint 的 config 与当前 --config 不一致，拒绝恢复。",
+                    flush=True,
+                )
+                return 2
+            if checkpoint.brain and checkpoint.brain != cfg.brain.type:
+                print(
+                    "[error] checkpoint 的 brain 与当前 --brain 不一致，拒绝恢复。",
+                    flush=True,
+                )
+                return 2
+            resume_state = checkpoint
+        else:
+            resume_state = rebuild_from_state(
+                resume_dir, cfg, brain_type=cfg.brain.type
+            )
+
+    if resume_dir is not None:
+        run_dir = resume_dir
+    else:
+        run_dir = make_run_dir(cfg)
+
     log = Logger(log_file=run_dir / "agent.log", verbose=not args.quiet)
     log.info(f"加载配置: {Path(args.config).resolve()}")
     log.info(f"大脑: {cfg.brain.type}，目标指标: {cfg.run.target_metric}")
     log.info(f"运行目录: {run_dir}")
 
     state = RunState(run_dir, log)
-    state.append(
-        "init",
-        step=0,
-        message="AutoResearch Agent 启动",
-        brain=cfg.brain.type,
-        task_description=cfg.experiment.description,
-        seed=cfg.experiment.seed,
-        max_steps=cfg.run.max_steps,
-        min_iterations=cfg.run.min_iterations,
-        target_metric=cfg.run.target_metric,
-    )
+    if resume_state is not None:
+        state.append(
+            "resume",
+            step=max(0, resume_state.next_step - 1),
+            message=(
+                f"从 checkpoint 续跑：下一步 step={resume_state.next_step}，"
+                f"已成功迭代 {resume_state.successful_rounds} 轮"
+            ),
+            next_step=resume_state.next_step,
+            successful_rounds=resume_state.successful_rounds,
+        )
+        log.info(
+            f"断点续跑: next_step={resume_state.next_step}, "
+            f"成功迭代={resume_state.successful_rounds}"
+        )
+    else:
+        state.append(
+            "init",
+            step=0,
+            message="AutoResearch Agent 启动",
+            brain=cfg.brain.type,
+            task_description=cfg.experiment.description,
+            seed=cfg.experiment.seed,
+            max_steps=cfg.run.max_steps,
+            min_iterations=cfg.run.min_iterations,
+            target_metric=cfg.run.target_metric,
+        )
 
     brain = build_brain(cfg, log)
     executor = Executor(cfg, run_dir, log)
     evaluator = Evaluator(cfg, log)
 
-    best_metrics: dict[str, Any] | None = None
-    best_params_file: Path | None = None
-    previous_value: float | None = None
-    improvements: deque[float] = deque(maxlen=cfg.run.convergence_rounds)
-    successful_rounds = 0
-    consecutive_failed_steps = 0
+    if resume_state is not None:
+        best_metrics: dict[str, Any] | None = resume_state.best_metrics
+        best_params_file: Path | None = (
+            Path(resume_state.best_params_file)
+            if resume_state.best_params_file else None
+        )
+        previous_value: float | None = resume_state.previous_value
+        last_metrics: dict[str, Any] | None = resume_state.last_metrics
+        improvements: deque[float] = deque(
+            resume_state.improvements,
+            maxlen=cfg.run.convergence_rounds,
+        )
+        successful_rounds = resume_state.successful_rounds
+        consecutive_failed_steps = resume_state.consecutive_failed_steps
+        brain.restore_state(resume_state.brain_state)
+        log.info(f"恢复大脑状态: {resume_state.brain_state}")
+    else:
+        best_metrics = None
+        best_params_file = None
+        previous_value = None
+        last_metrics = None
+        improvements = deque(maxlen=cfg.run.convergence_rounds)
+        successful_rounds = 0
+        consecutive_failed_steps = 0
     stop_reason = "stop_max_steps"
-    last_metrics: dict[str, Any] | None = None
 
-    for step in range(1, cfg.run.max_steps + 1):
+    def save_point(next_step: int) -> None:
+        point = ResumeState(
+            next_step=next_step,
+            successful_rounds=successful_rounds,
+            consecutive_failed_steps=consecutive_failed_steps,
+            best_metrics=best_metrics,
+            last_metrics=last_metrics,
+            best_params_file=(
+                str(best_params_file.resolve())
+                if best_params_file is not None else None
+            ),
+            previous_value=previous_value,
+            improvements=list(improvements),
+            brain_state=brain.checkpoint_state(),
+            config_file=str(cfg.config_file),
+        )
+        save_checkpoint(run_dir, point, brain=cfg.brain.type)
+
+    start_step = resume_state.next_step if resume_state is not None else 1
+    for step in range(start_step, cfg.run.max_steps + 1):
         log.info(f"===== 第 {step} 步（共 {cfg.run.max_steps}） =====")
 
         # 1) 大脑提出下一步修改方案
@@ -367,7 +506,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             if consecutive_failed_steps >= cfg.run.max_consecutive_errors:
                 stop_reason = "stop_failure"
+                save_point(step + 1)
                 break
+            save_point(step + 1)
             continue
 
         if action is None:
@@ -377,6 +518,7 @@ def main(argv: list[str] | None = None) -> int:
                 message="候选方案已耗尽，停止本轮运行",
                 decision="stop_plan_exhausted",
             )
+            save_point(step + 1)
             break
 
         state.append(
@@ -431,8 +573,10 @@ def main(argv: list[str] | None = None) -> int:
         if not step_ok:
             if consecutive_failed_steps >= cfg.run.max_consecutive_errors:
                 stop_reason = "stop_failure"
+                save_point(step + 1)
                 break
             # 尝试下一个候选方案（不把失败计入“成功迭代”）
+            save_point(step + 1)
             continue
 
         successful_rounds += 1
@@ -451,7 +595,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             if consecutive_failed_steps >= cfg.run.max_consecutive_errors:
                 stop_reason = "stop_failure"
+                save_point(step + 1)
                 break
+            save_point(step + 1)
             continue
 
         best_metrics = evaluation.best_metrics
@@ -501,7 +647,9 @@ def main(argv: list[str] | None = None) -> int:
                 message=f"触发终止条件: {reason}",
                 decision=reason,
             )
+            save_point(step + 1)
             break
+        save_point(step + 1)
 
     # 收尾：汇总与可读日志
     submission_result = run_best_submission(

@@ -140,6 +140,7 @@ class AgentConfig:
     experiment: ExperimentConfig
     brain: BrainConfig
     run: RunConfig
+    config_file: str = ""
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "AgentConfig":
@@ -157,6 +158,7 @@ class AgentConfig:
             experiment=experiment,
             brain=brain,
             run=run,
+            config_file=str(cfg_path),
         )
         cfg.apply_llm_env_overrides()
         cfg.validate()

@@ -17,6 +17,19 @@ class RunState:
         self.log = log
         self.state_file = self.run_dir / "state.jsonl"
         self.entries: list[dict[str, Any]] = []
+        if self.state_file.exists():
+            for line in self.state_file.read_text(
+                encoding="utf-8"
+            ).splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    self.entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    self.log.warning(
+                        f"state.jsonl 存在无法解析的历史行，已跳过: "
+                        f"{line[:200]}"
+                    )
 
     def append(
         self,

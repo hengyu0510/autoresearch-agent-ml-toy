@@ -109,6 +109,16 @@ class RuleBrain:
             else RULE_CANDIDATES
         )
 
+    def checkpoint_state(self) -> dict[str, Any]:
+        return {"type": self.name, "rule_index": self._index}
+
+    def restore_state(self, data: dict[str, Any] | None) -> None:
+        if not data:
+            return
+        index = data.get("rule_index")
+        if isinstance(index, int):
+            self._index = max(0, min(index, len(self.candidates)))
+
     def propose(self, step: int, state: RunState) -> Action | None:
         if self._index >= len(self.candidates):
             return None
@@ -162,6 +172,18 @@ class LLMBrain:
             or self.DEFAULT_KEY_ENVS[self.provider]
         )
         self.api_key = os.environ.get(self.key_env, "")
+
+    def checkpoint_state(self) -> dict[str, Any]:
+        return {
+            "type": self.name,
+            "fallback_rule": (
+                self.fallback.checkpoint_state() if self.fallback else None
+            ),
+        }
+
+    def restore_state(self, data: dict[str, Any] | None) -> None:
+        if data and self.fallback:
+            self.fallback.restore_state(data.get("fallback_rule"))
 
     @property
     def system_prompt(self) -> str:

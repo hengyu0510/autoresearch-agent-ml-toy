@@ -97,6 +97,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--kaggle-upload", action="store_true",
         help="本地提交校验通过后，再调用 Kaggle CLI 实际上传（默认不上传）。",
     )
+    parser.add_argument(
+        "--resume", nargs="?", const="latest", default=None,
+        metavar="RUN_DIR|latest",
+        help=(
+            "透传给 run_agent：省略参数时每个任务自动续跑各自 runs 下最新 run；"
+            "显式路径仅适合 --tasks 单个任务。"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -203,6 +211,8 @@ def build_agent_cmd(
         cmd.append("--quiet")
     if args.kaggle_upload:
         cmd.append("--kaggle-upload")
+    if args.resume:
+        cmd += ["--resume", args.resume]
     return cmd
 
 
@@ -226,9 +236,37 @@ def find_new_run_dir(runs_root: Path, after: datetime) -> Path | None:
         if ts is not None and ts >= after.replace(microsecond=0):
             candidates.append((ts, child))
     if not candidates:
-        return None
+        # --resume 续跑的是已存在的旧目录：按 state.jsonl 的 mtime 兜底识别。
+        mtime_candidates: list[tuple[float, Path]] = []
+        for child in runs_root.iterdir():
+            if not child.is_dir():
+                continue
+            state_file = child / "state.jsonl"
+            if not state_file.exists():
+                continue
+            mtime = state_file.stat().st_mtime
+            if mtime >= after.timestamp() - 5.0:
+                mtime_candidates.append((mtime, child))
+        if not mtime_candidates:
+            return None
+        mtime_candidates.sort(key=lambda pair: pair[0])
+        return mtime_candidates[-1][1]
     candidates.sort(key=lambda pair: pair[0])
     return candidates[-1][1]
+
+
+def find_latest_run_dir(runs_root: Path) -> Path | None:
+    """返回 runs_root 下最近有 state.jsonl 的 run 目录。"""
+    if not runs_root.is_dir():
+        return None
+    choices: list[tuple[float, Path]] = []
+    for child in runs_root.iterdir():
+        if child.is_dir() and (child / "state.jsonl").exists():
+            choices.append((child.stat().st_mtime, child))
+    if not choices:
+        return None
+    choices.sort(key=lambda pair: pair[0])
+    return choices[-1][1]
 
 
 def load_summary(run_dir: Path | None) -> tuple[dict[str, Any], str]:
@@ -445,6 +483,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[info] {task_id}: runs 根目录 = {runs_root}", flush=True)
         code = run_cmd(agent_cmd, cwd=PROJECT_ROOT)
         run_dir = find_new_run_dir(runs_root, started_at)
+        if run_dir is None and code == 0 and args.resume:
+            # --resume 遇到已正常完成的 run：run_agent 会无操作退出（rc=0），
+            # 此时沿用最近一次 summary 作为该任务结果。
+            latest = find_latest_run_dir(runs_root)
+            if latest is not None:
+                run_dir = latest
         summary, summary_error = load_summary(run_dir)
         if summary:
             brain = summary.get("brain") or args.brain or cfg.brain.type
