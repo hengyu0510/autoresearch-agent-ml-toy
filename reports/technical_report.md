@@ -62,7 +62,8 @@ plan（rule/LLM 提出 params）
 ```
 
 每一步均追加到 `runs/<task_id>/<timestamp>/state.jsonl`，并同步产出
-参数快照、stdout/stderr、metrics JSON、summary.json 与 RUN_LOG.md，满足
+参数快照、stdout/stderr、metrics JSON、summary.json、checkpoint.json 与
+RUN_LOG.md，满足
 “完整过程可追溯”的要求。终止机制覆盖三类退出：达到最大步数
 （`stop_max_steps`）、连续轮次提升不足（`stop_converged`）、连续致命错误
 （`stop_failure`），退出原因均写入状态。
@@ -91,6 +92,9 @@ plan（rule/LLM 提出 params）
   配置允许的 key、scaler/hyperparams/任务级字段做类型与边界清洗
   （如 `max_features: auto → sqrt`、`n_estimators`/`max_iter` 上限）；
 - `stop_failure`、0 轮成功或提交失败会映射为非零退出码，供 run_all/CI 判定；
+- 每完成一步会落盘 `checkpoint.json`；`--resume [run_dir|latest]` 从
+  next_step 恢复大脑游标、最佳参数与收敛状态，无 checkpoint 的旧 run 会从
+  state.jsonl 兼容重建；
 - 连续致命错误达到阈值即停止并记录原因，防止无限循环。
 
 ### 3.4 收尾自动提交
@@ -153,7 +157,6 @@ sample 比对格式（含行序、数值/NaN/Inf 校验）”，结果写入 sta
 - 5 个 Kaggle 竞赛均为历史比赛，真实线上提交未执行；提交文件仅完成本地格式
   校验；如需实际上传可显式 `--kaggle-upload`，是否仍开放提交取决于比赛状态；
 - `rule` 大脑是确定性候选序列，不具备真正的“反思式实验设计”；
-- 单次运行不支持断点续跑（暂无 `--resume`）；
 - 依赖声明采用 `>=` 下限，全新环境会随时间解析到更新版本，需定期回归；
 - 后续可扩展方向：自动生成并迭代“特征工程/数据处理代码”而不仅是模型参数、
   多 run 取均值汇报、断点恢复。
@@ -178,6 +181,12 @@ python experiments/validate_submission.py \
 
 # 一键批量（数据缺失自动下载）
 python run_all.py --brain llm --max-steps 3
+
+# 断点续跑（自动最新 run / 指定 run / 批量续跑）
+python run_agent.py --config configs/titanic.yaml --resume
+python run_agent.py --config configs/titanic.yaml \
+    --resume runs/titanic/<timestamp>
+python run_all.py --resume --brain llm --max-steps 6
 ```
 
 ### 6.3 已入库的可复现产物

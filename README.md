@@ -104,6 +104,14 @@ python run_all.py --tasks titanic --brain rule --max-steps 3
 # 先预览将要执行的下载与训练命令
 python run_all.py --dry-run
 
+# 断点续跑（run_agent：自动最新 run / 指定 run）
+python run_agent.py --config configs/titanic.yaml --resume
+python run_agent.py --config configs/titanic.yaml \
+    --resume runs/titanic/<timestamp>
+
+# 批量续跑：每个任务自动恢复自己最新的 run
+python run_all.py --resume --brain llm --max-steps 6
+
 # ---------- 以下为单任务/手动等价命令（run_all.py 会逐个执行） ----------
 # 1) 查看/下载任务数据（需 Kaggle 凭证且已在网页接受规则）
 python -m data.fetch --list
@@ -127,6 +135,7 @@ python run_agent.py --config configs/titanic.yaml --brain llm --max-steps 3
 runs/<task_id>/<timestamp>/
 ├── state.jsonl        # 每步决策/工具调用/结果/错误
 ├── summary.json       # 最佳结果与停止原因
+├── checkpoint.json    # 每完成一步的续跑检查点（--resume 读取）
 ├── RUN_LOG.md         # 可读运行日志
 ├── snapshots/         # 每轮参数快照（可复现/可喂给 submit.py）
 ├── metrics/           # 每轮指标 JSON
@@ -283,5 +292,7 @@ Agent 运行失败时会以非零退出码结束（`stop_failure`、0 轮成功�
 - 提交脚本已验证格式；实际上传 Kaggle 需显式 `--kaggle-upload`，老竞赛是否
   仍开放线上提交取决于账号与比赛状态；
 - `rule` 大脑是确定性候选序列，无真正"反思式实验设计"；
-- 单次运行不支持断点续跑（暂无 `--resume`）；
+- 断点续跑只保证从最近“已完成 step”继续；中断在实验执行中途时，该 step 会
+  从方案重跑一次。已正常完成的 run 会拒绝 `--resume`（需新 run 或手动改名
+  `summary.json` 后才继续）。旧 run 无 checkpoint 时会尽力从 state.jsonl 恢复；
 - `llm` 大脑依赖外部 API：调用失败自动重试一次后回退 rule。
