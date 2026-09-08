@@ -20,15 +20,15 @@
 | 主题 | 当前决策 |
 | --- | --- |
 | 实验任务 | 5 个 Kaggle 任务（`tasks/tasks.yaml`）：titanic、house_prices、bike_sharing_demand、digit_recognizer、facial_keypoints；`experiments/train.py` 保留 sklearn 乳腺癌数据作为通用示例 |
-| 系统形态 | Python 自治进程（主入口 `run_agent.py`）；决策大脑可插拔：`rule`（无 Key、确定性候选）与 `llm`（真实 API，默认 DeepSeek deepseek-v4-flash） |
+| 系统形态 | Python 自治进程（单任务入口 `run_agent.py`，批量入口 `run_all.py`）；决策大脑可插拔：`rule`（无 Key、确定性候选）与 `llm`（真实 API，默认 DeepSeek deepseek-v4-flash） |
 | 数据与指标 | 每个任务固定 seed 划分；决策只看 `val_*` 指标，最终只报 `test_*`；指标方向由 `run.higher_is_better` 配置（bike 按时间顺序切分，facial 按行切分并逐坐标训练） |
 | 迭代闭环 | planner → executor → evaluator → state → 决策（继续/回退/停止）；每步参数快照与 stdout/stderr 落盘 |
 | 失败与恢复 | LLM 空响应/截断 JSON 自动重试一次，再失败回退 rule；步骤错误先读 traceback 再重试；连续致命错误按阈值退出 |
-| 终止机制 | 各任务 config 默认 `max_steps=6`、`min_iterations=3`；提升不足达到收敛轮数、达到最大步数、连续失败三类退出均写入 state |
+| 终止机制 | 各任务 config 默认 `max_steps=6`、`min_iterations=3`；提升不足达到收敛轮数、达到最大步数、连续失败三类退出均写入 state；`stop_failure`/0 轮成功/提交失败映射为非零退出码 |
 | 状态记录 | `runs/<task_id>/<timestamp>/state.jsonl`，含输入、决策、工具调用、输出、错误与下一步动作 |
 | 可配置项 | 任务与 `rule_candidates`、指标方向、LLM provider/model/base_url/api_key_env/reasoning_effort/max_tokens、运行预算与阈值 |
-| 提交管线 | 每任务 `submit.py` 用全部有标签数据重训并输出 Kaggle 格式文件；run_agent 收尾自动用最佳快照生成提交并调用 `experiments/validate_submission.py` 校验，结果写入 state/summary |
-| 可复现性 | `python run_agent.py --config configs/<task_id>.yaml --brain rule|llm --max-steps 3` |
+| 提交管线 | 每任务 `submit.py` 用全部有标签数据重训并输出 Kaggle 格式文件；run_agent 收尾自动用最佳快照生成提交并调用 `experiments/validate_submission.py` 校验（行序/数值/NaN/Inf）；可显式 `--kaggle-upload` 实际上传，默认不访问网络 |
+| 可复现性 | 单任务：`python run_agent.py --config configs/<task_id>.yaml --brain rule|llm --max-steps 3`；全局最佳参数提交为 `submissions/best_<task_id>_params.yaml`，示例完整运行入库于 `reports/example_runs/` |
 | 批量入口 | `python run_all.py [--tasks <id,...>] [--brain rule|llm] [--max-steps N]`：数据缺失自动下载，按序运行一个或全部任务，单任务失败不中断，汇总报告写入 `runs/batch/<timestamp>/` |
 
 ## 3. 工作约定
@@ -62,6 +62,7 @@ Autoresearch-agent-ml/
 ├── agent/                 # 框架核心（config/logger/state/planner/executor/evaluator）
 ├── data/
 │   ├── fetch.py           # Kaggle 下载与缓存
+│   ├── kaggle_upload.py   # 可选的 Kaggle CLI 提交上传
 │   ├── raw/               # 解压后的原始数据（gitignore）
 │   └── archives/          # 压缩包缓存（gitignore）
 ├── tasks/                 # tasks.yaml + registry.py
@@ -70,9 +71,9 @@ Autoresearch-agent-ml/
 │   ├── validate_submission.py
 │   ├── train.py           # 乳腺癌示例
 │   └── tasks/<task_id>/   # train.py + baseline.yaml + submit.py
-├── submissions/           # 生成的提交文件与指标（baseline 版本已校验）
+├── submissions/           # 提交文件、指标与最佳参数 YAML（已校验）
 ├── runs/<task_id>/        # 各任务运行产物（gitignore）
-└── reports/               # 规划中：technical_report.md / RUN_LOG.md
+└── reports/               # technical_report.md + example_runs/（完整运行日志已入库）
 ```
 
 ## 5. 验收状态（Definition of Done）
@@ -93,16 +94,21 @@ Autoresearch-agent-ml/
 - [x] 5 个任务提交管线打通，提交文件通过官方 sample 格式校验；
 - [x] run_agent 收尾阶段已加入"最佳参数快照 → 自动生成提交 → 格式校验"，
       产物写入 `runs/<task_id>/<timestamp>/submissions/`；
+- [x] Agent 失败态可检测：`stop_failure`/0 轮成功/提交失败 -> run_agent 非零退出，
+      run_all 汇总为 `failed` 而非 `ok`；
+- [x] LLM params 程序级白名单与资源/超参边界校验，非白名单字段自动忽略；
+- [x] 提交管线修复：bike/digit 保留原始行序与 ImageId；validator 增加数值/NaN/Inf
+      校验；`--kaggle-upload` 可显式实际上传；
+- [x] `reports/technical_report.md`、最佳参数 YAML 与示例完整运行已入库，clone 后可复现；
 - [x] 无密钥提交、路径可配置、无临时调试残留。
 
 待办：
 
-- [ ] 汇总交付 `reports/technical_report.md`（≤6 页）与可读完整运行日志；
 - [ ] 为本次 LLM 迭代前的历史 run 补生成提交，或直接运行新的 run 由收尾
       阶段自动生成；
 - [ ] 可选：`--resume`、git 集成、更多轮次的分任务深入研究。
 
-## 6. 当前运行参考（2026-09-07，LLM = deepseek-v4-flash, effort=max）
+## 6. 当前运行参考（2026-09-08，LLM = deepseek-v4-flash, effort=max）
 
 | 任务 | 最佳实验 | val | test |
 | --- | --- | --- | --- |

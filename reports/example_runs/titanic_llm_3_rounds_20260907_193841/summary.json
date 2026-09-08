@@ -1,0 +1,60 @@
+{
+  "run_id": "20260907_193841",
+  "finished_at": "2026-09-07T19:39:04",
+  "brain": "llm",
+  "config_file": "C:\\Users\\why\\Desktop\\Autoresearch-agent-ml\\configs\\titanic.yaml",
+  "max_steps": 3,
+  "min_iterations": 3,
+  "target_metric": "val_acc",
+  "successful_iterations": 3,
+  "stop_reason": "stop_max_steps",
+  "best_metrics": {
+    "task": "titanic",
+    "model": "mlp",
+    "scaler": true,
+    "hyperparams": {
+      "hidden_layer_sizes": [
+        16
+      ],
+      "alpha": 0.0001,
+      "max_iter": 1000,
+      "random_state": 42
+    },
+    "seed": 42,
+    "n_train": 534,
+    "n_val": 178,
+    "n_test": 179,
+    "train_seconds": 0.3642,
+    "val_acc": 0.8258426966292135,
+    "test_acc": 0.8268156424581006,
+    "val_auc": 0.8494652406417114,
+    "test_auc": 0.8642951251646904,
+    "val_f1": 0.7394957983193278,
+    "test_f1": 0.7669172932330827
+  },
+  "last_metrics": {
+    "task": "titanic",
+    "model": "mlp",
+    "scaler": true,
+    "hyperparams": {
+      "hidden_layer_sizes": [
+        16
+      ],
+      "alpha": 0.0001,
+      "max_iter": 1000,
+      "random_state": 42
+    },
+    "seed": 42,
+    "n_train": 534,
+    "n_val": 178,
+    "n_test": 179,
+    "train_seconds": 0.3642,
+    "val_acc": 0.8258426966292135,
+    "test_acc": 0.8268156424581006,
+    "val_auc": 0.8494652406417114,
+    "test_auc": 0.8642951251646904,
+    "val_f1": 0.7394957983193278,
+    "test_f1": 0.7669172932330827
+  },
+  "state_file": "C:\\Users\\why\\Desktop\\Autoresearch-agent-ml\\runs\\titanic\\20260907_193841\\state.jsonl"
+}

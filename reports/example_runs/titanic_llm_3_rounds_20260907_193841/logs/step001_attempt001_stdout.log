@@ -1,0 +1,4 @@
+[train] titanic: n_train=534, n_val=178, n_test=179
+[train] model=logistic_regression, scaler=True, 训练耗时=0.0153s
+[train] val_acc=0.8202, test_acc=0.8101
+[train] 指标已写入: C:\Users\why\Desktop\Autoresearch-agent-ml\runs\titanic\20260907_193841\metrics\step001_attempt001_metrics.json

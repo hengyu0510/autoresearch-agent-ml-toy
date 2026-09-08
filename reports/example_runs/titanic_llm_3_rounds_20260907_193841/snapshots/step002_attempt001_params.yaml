@@ -1,0 +1,6 @@
+model: random_forest
+scaler: false
+hyperparams:
+  n_estimators: 100
+  max_depth: null
+  random_state: 42

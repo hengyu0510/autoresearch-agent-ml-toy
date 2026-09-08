@@ -1,0 +1,21 @@
+{
+  "task": "titanic",
+  "model": "random_forest",
+  "scaler": false,
+  "hyperparams": {
+    "n_estimators": 100,
+    "max_depth": null,
+    "random_state": 42
+  },
+  "seed": 42,
+  "n_train": 534,
+  "n_val": 178,
+  "n_test": 179,
+  "train_seconds": 0.0863,
+  "val_acc": 0.7696629213483146,
+  "test_acc": 0.776536312849162,
+  "val_auc": 0.8477272727272728,
+  "test_auc": 0.8218050065876152,
+  "val_f1": 0.6771653543307087,
+  "test_f1": 0.7142857142857143
+}

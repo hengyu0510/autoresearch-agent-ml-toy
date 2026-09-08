@@ -1,0 +1,24 @@
+{
+  "task": "titanic",
+  "model": "mlp",
+  "scaler": true,
+  "hyperparams": {
+    "hidden_layer_sizes": [
+      16
+    ],
+    "alpha": 0.0001,
+    "max_iter": 1000,
+    "random_state": 42
+  },
+  "seed": 42,
+  "n_train": 534,
+  "n_val": 178,
+  "n_test": 179,
+  "train_seconds": 0.3642,
+  "val_acc": 0.8258426966292135,
+  "test_acc": 0.8268156424581006,
+  "val_auc": 0.8494652406417114,
+  "test_auc": 0.8642951251646904,
+  "val_f1": 0.7394957983193278,
+  "test_f1": 0.7669172932330827
+}

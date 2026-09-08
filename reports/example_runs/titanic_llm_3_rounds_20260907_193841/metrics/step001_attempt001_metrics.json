@@ -1,0 +1,21 @@
+{
+  "task": "titanic",
+  "model": "logistic_regression",
+  "scaler": true,
+  "hyperparams": {
+    "max_iter": 1000,
+    "C": 1.0,
+    "solver": "lbfgs"
+  },
+  "seed": 42,
+  "n_train": 534,
+  "n_val": 178,
+  "n_test": 179,
+  "train_seconds": 0.0153,
+  "val_acc": 0.8202247191011236,
+  "test_acc": 0.8100558659217877,
+  "val_auc": 0.843716577540107,
+  "test_auc": 0.8686429512516468,
+  "val_f1": 0.7377049180327869,
+  "test_f1": 0.75
+}

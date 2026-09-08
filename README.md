@@ -4,9 +4,10 @@
 提出下一步修改方案、真实执行 Python 实验、读取指标并独立判断继续/回退/停止，
 最终产出可追溯的运行记录、提交文件与报告。
 
-> 当前状态（2026-09-07）：5 个 Kaggle 任务的数据/Baseline/提交管线已打通；
+> 当前状态（2026-09-08）：5 个 Kaggle 任务的数据/Baseline/提交管线已打通；
 > LLM（deepseek-v4-flash, effort=max）在 5 个任务各完成 3 轮真实迭代，
-> rule 大脑完成确定性闭环复现；`reports/technical_report.md` 尚待整理。
+> rule 大脑完成确定性闭环复现；`reports/technical_report.md` 已整理，
+> 最佳参数与一份完整示例运行已随仓库提交（见“提交管线”与目录结构）。
 
 ## 环境与安装
 
@@ -144,19 +145,20 @@ Autoresearch-agent-ml/
 ├── README.md
 ├── config.yaml            # 乳腺癌示例配置
 ├── configs/<task_id>.yaml # 5 个 Kaggle 任务的 Agent 配置
-├── run_agent.py           # 唯一主入口
+├── run_agent.py           # 单任务主入口
+├── run_all.py             # 一键批量入口（可选：全部/部分任务顺序运行）
 ├── agent/                 # config / logger / state / planner / executor / evaluator
-├── data/                  # fetch.py + raw/ + archives/
+├── data/                  # fetch.py + kaggle_upload.py + raw/ + archives/
 ├── tasks/                 # tasks.yaml + registry.py
 ├── experiments/
 │   ├── common.py          # 共享 CLI/参数/指标/超参清洗
 │   ├── validate_submission.py
 │   ├── train.py           # 乳腺癌示例
 │   └── tasks/<task_id>/   # train.py + baseline.yaml + submit.py
-├── submissions/           # 生成的 Kaggle 提交文件
+├── submissions/           # Kaggle 提交文件 + 最佳参数 YAML（可重生成）
 ├── runs/                  # 运行产物（gitignore）
 │   └── <task_id>/<timestamp>/submissions/best_submission.csv  # 自动提交产物
-└── reports/               # 规划中
+└── reports/               # technical_report.md + example_runs/（已入库的完整运行日志）
 ```
 
 ## 实验任务池
@@ -242,13 +244,22 @@ Agent 正常运行到收尾阶段后会自动执行“最佳快照 → 全量重
 格式校验”，产物与校验结果写入 `runs/<task_id>/<timestamp>/submissions/` 和
 `state.jsonl`/`summary.json`（不需要手动指定参数）。
 
-当前 `submissions/` 中的是 baseline 参数产物；用某轮最佳参数重生成：
+`submissions/best_<task_id>_submission.csv` 为当前全局最佳提交，
+对应的参数快照已提交为 `submissions/best_<task_id>_params.yaml`，
+clone 后下载数据即可直接重生成：
 
 ```bash
-# 将 <task_id>/<run_id>/<step> 替换为你自己 run 目录中的实际值，例如：
 python experiments/tasks/titanic/submit.py \
-    --params runs/<task_id>/<run_id>/snapshots/<step>_params.yaml
+    --params submissions/best_titanic_params.yaml \
+    --out submissions/best_titanic_submission.csv
 ```
+
+如需在本地校验通过后**实际上传** Kaggle（默认不上传、不访问网络），在
+`run_agent.py` / `run_all.py` 上追加 `--kaggle-upload`；老竞赛是否仍接受
+提交取决于账号与比赛当前状态。
+
+Agent 运行失败时会以非零退出码结束（`stop_failure`、0 轮成功或本地提交
+失败均算失败），`run_all.py` 会把这类任务标记为 `failed` 而不是 `ok`。
 
 ## 可配置项
 
@@ -269,8 +280,8 @@ python experiments/tasks/titanic/submit.py \
 
 ## 已知限制
 
-- 提交脚本已验证格式，但 5 个 Kaggle 老竞赛是否仍开放线上提交取决于账号与比赛状态；
+- 提交脚本已验证格式；实际上传 Kaggle 需显式 `--kaggle-upload`，老竞赛是否
+  仍开放线上提交取决于账号与比赛状态；
 - `rule` 大脑是确定性候选序列，无真正"反思式实验设计"；
 - 单次运行不支持断点续跑（暂无 `--resume`）；
-- `reports/technical_report.md` 与最终交付报告尚未整理；
 - `llm` 大脑依赖外部 API：调用失败自动重试一次后回退 rule。

@@ -1,0 +1,5 @@
+model: mlp
+scaler: false
+hyperparams:
+  hidden_layer_sizes:
+  - 256

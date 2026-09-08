@@ -1,0 +1,27 @@
+[2026-09-07 19:38:41] [INFO] 加载配置: C:\Users\why\Desktop\Autoresearch-agent-ml\configs\titanic.yaml
+[2026-09-07 19:38:41] [INFO] 大脑: llm，目标指标: val_acc
+[2026-09-07 19:38:41] [INFO] 运行目录: C:\Users\why\Desktop\Autoresearch-agent-ml\runs\titanic\20260907_193841
+[2026-09-07 19:38:41] [INFO] ===== 第 1 步（共 3） =====
+[2026-09-07 19:38:45] [INFO] LLM 提出方案: 运行一个简单的逻辑回归基线模型，使用标准化特征，并设置较长的最大迭代次数以确保收敛
+[2026-09-07 19:38:45] [INFO] 执行实验: 运行一个简单的逻辑回归基线模型，使用标准化特征，并设置较长的最大迭代次数以确保收敛（尝试 1）
+[2026-09-07 19:38:45] [INFO] 参数快照: C:\Users\why\Desktop\Autoresearch-agent-ml\runs\titanic\20260907_193841\snapshots\step001_attempt001_params.yaml
+[2026-09-07 19:38:47] [INFO] 实验完成 step=1 attempt=1，耗时 2.22s，val_acc=0.8202
+[2026-09-07 19:38:47] [INFO] 评估决策: accept — 首轮结果，作为当前最佳（val_acc=0.8202）
+[2026-09-07 19:38:47] [INFO] ===== 第 2 步（共 3） =====
+[2026-09-07 19:38:53] [INFO] LLM 提出方案: 将模型从 logistic_regression 切换为 random_forest，设置常用超参数（n_estimators=100, max_depth=None, random_state=42）
+[2026-09-07 19:38:53] [INFO] 执行实验: 将模型从 logistic_regression 切换为 random_forest，设置常用超参数（n_estimators=100, max_depth=None, random_state=42）（尝试 1）
+[2026-09-07 19:38:53] [INFO] 参数快照: C:\Users\why\Desktop\Autoresearch-agent-ml\runs\titanic\20260907_193841\snapshots\step002_attempt001_params.yaml
+[2026-09-07 19:38:54] [INFO] 实验完成 step=2 attempt=1，耗时 1.18s，val_acc=0.7697
+[2026-09-07 19:38:54] [INFO] 评估决策: revert — val_acc=0.7697 低于当前最佳 0.8202，保留最佳结果并记录本轮回退
+[2026-09-07 19:38:54] [INFO] ===== 第 3 步（共 3） =====
+[2026-09-07 19:39:02] [INFO] LLM 提出方案: 尝试 MLP 模型，观察能否优于逻辑回归的验证准确率
+[2026-09-07 19:39:02] [INFO] 执行实验: 尝试 MLP 模型，观察能否优于逻辑回归的验证准确率（尝试 1）
+[2026-09-07 19:39:02] [INFO] 参数快照: C:\Users\why\Desktop\Autoresearch-agent-ml\runs\titanic\20260907_193841\snapshots\step003_attempt001_params.yaml
+[2026-09-07 19:39:04] [INFO] 实验完成 step=3 attempt=1，耗时 1.39s，val_acc=0.8258
+[2026-09-07 19:39:04] [INFO] 评估决策: accept — val_acc 达到 0.8258，不低于当前最佳 0.8202，采纳本轮结果
+[2026-09-07 19:39:04] [INFO] ==================================================
+[2026-09-07 19:39:04] [INFO] 停止原因: stop_max_steps
+[2026-09-07 19:39:04] [INFO] 成功迭代: 3 轮
+[2026-09-07 19:39:04] [INFO] 最佳结果: {"task": "titanic", "model": "mlp", "scaler": true, "hyperparams": {"hidden_layer_sizes": [16], "alpha": 0.0001, "max_iter": 1000, "random_state": 42}, "seed": 42, "n_train": 534, "n_val": 178, "n_test": 179, "train_seconds": 0.3642, "val_acc": 0.8258426966292135, "test_acc": 0.8268156424581006, "val_auc": 0.8494652406417114, "test_auc": 0.8642951251646904, "val_f1": 0.7394957983193278, "test_f1": 0.7669172932330827}
+[2026-09-07 19:39:04] [INFO] 产物目录: C:\Users\why\Desktop\Autoresearch-agent-ml\runs\titanic\20260907_193841
+[2026-09-07 19:39:04] [INFO] 完整状态: C:\Users\why\Desktop\Autoresearch-agent-ml\runs\titanic\20260907_193841\state.jsonl

@@ -1,7 +1,7 @@
 # AutoResearch Agent for ML — Technical Report
 
 > 日期：2026-09-08 ｜ 语言：中文 ｜ 页数目标：≤6 页
-> 配套仓库：Autoresearch-agent-ml；本报告对应的运行记录见第 7 节复现索引。
+> 配套仓库：Autoresearch-agent-ml；本报告对应的复现说明见第 6 节复现索引。
 
 ## 1. 摘要与验收对应
 
@@ -23,15 +23,14 @@ LLM 大脑在 5 个任务上各完成 3 轮真实迭代；5 份“全局最佳�
 | 核心流程 | 第 2 节 |
 | 关键设计 | 第 3 节 |
 | 实验/测试结果 | 第 4 节 |
-| 失败案例 | 第 5 节 |
-| 改进方向 | 第 6 节 |
+| 改进方向 | 第 5 节 |
 
 ## 2. 系统架构与核心流程
 
 系统采用“单一主入口 + 可插拔决策大脑 + 任务级实验脚本”的分层结构：
 
 ```text
-run_agent.py（唯一主入口）
+run_agent.py（单任务入口）+ run_all.py（一键批量入口）
 ├── agent/config.py      配置加载、路径解析、LLM 环境变量覆盖
 ├── agent/planner.py     决策大脑：rule / llm（OpenAI 兼容 / Anthropic）
 ├── agent/executor.py    参数快照落盘 + subprocess 真实运行实验
@@ -39,6 +38,10 @@ run_agent.py（唯一主入口）
 ├── agent/state.py       全量状态 JSONL + 可读 RUN_LOG
 └── configs/<task_id>.yaml  每任务的运行配置
 ```
+
+`run_all.py` 会按任务注册表顺序运行一个或全部任务：数据缺失时自动下载、
+逐个调用 `run_agent.py`、收尾生成提交，并把汇总报告写入
+`runs/batch/<timestamp>/`；单个任务失败不中断整批。
 
 任务层将“评估实验”与“提交管线”分开：
 
@@ -84,13 +87,18 @@ plan（rule/LLM 提出 params）
 - `rule` 大脑：确定性候选序列，无需 API key，适合复现与验证；
 - `llm` 大脑：真实调用 DeepSeek；模型/端点/effort 通过 `.env` 注入；
 - 空响应或 JSON 截断自动重试一次，仍失败则回退 rule；
-- LLM 提出的旧版超参（如 `max_features: auto`）经统一清洗后再构造模型；
+- LLM 输出的 params 会先做程序级校验：模型名必须在白名单内、顶层字段只保留
+  配置允许的 key、scaler/hyperparams/任务级字段做类型与边界清洗
+  （如 `max_features: auto → sqrt`、`n_estimators`/`max_iter` 上限）；
+- `stop_failure`、0 轮成功或提交失败会映射为非零退出码，供 run_all/CI 判定；
 - 连续致命错误达到阈值即停止并记录原因，防止无限循环。
 
 ### 3.4 收尾自动提交
 
 Agent 停止后自动执行“最佳参数快照 → 全量重训 → 生成提交 CSV → 与官方
-sample 比对格式”，结果写入 state/summary，避免“文档最佳与提交文件不一致”。
+sample 比对格式（含行序、数值/NaN/Inf 校验）”，结果写入 state/summary，
+避免“文档最佳与提交文件不一致”。如需实际上传 Kaggle，可显式传入
+`--kaggle-upload`（默认不访问网络）。
 
 ## 4. 实验设计与结果
 
@@ -117,18 +125,19 @@ sample 比对格式”，结果写入 state/summary，避免“文档最佳与�
 
 | 任务 | 最佳参数来源 | 训练行数 | 提交行数 |
 | --- | --- | --- | --- |
-| titanic | runs/titanic/20260906_205335/snapshots/step003_attempt001_params.yaml | 891 | 418 |
-| house_prices | runs/house_prices/20260906_163159/snapshots/step003_attempt001_params.yaml | 1460 | 1459 |
-| bike_sharing_demand | runs/bike_sharing_demand/20260906_163313/snapshots/step002_attempt001_params.yaml | 10886 | 6493 |
-| digit_recognizer | runs/digit_recognizer/20260907_194210/snapshots/step003_attempt001_params.yaml | 42000 | 28000 |
-| facial_keypoints | runs/facial_keypoints/20260906_163343/snapshots/step002_attempt001_params.yaml | 7049 | 27124（按 IdLookupTable 映射） |
+| titanic | submissions/best_titanic_params.yaml | 891 | 418 |
+| house_prices | submissions/best_house_prices_params.yaml | 1460 | 1459 |
+| bike_sharing_demand | submissions/best_bike_sharing_demand_params.yaml | 10886 | 6493 |
+| digit_recognizer | submissions/best_digit_recognizer_params.yaml | 42000 | 28000 |
+| facial_keypoints | submissions/best_facial_keypoints_params.yaml | 7049 | 27124（按 IdLookupTable 映射） |
 
 对应文件为 `submissions/best_<task_id>_submission.csv`，列名、行数与 id 顺序
-均与官方 sample 一致。
+均与官方 sample 一致；上述参数 YAML 已随仓库提交，clone 后下载数据即可重生成。
 
 ### 4.4 titanic 单任务过程示例（LLM 大脑 3 轮）
 
-来自 `runs/titanic/20260907_193841/RUN_LOG.md` 的真实决策链：
+来自 `reports/example_runs/titanic_llm_3_rounds_20260907_193841/RUN_LOG.md`
+（该完整运行已随仓库提交）的真实决策链：
 
 | 步 | 大脑提出的修改 | val_acc | 决策 |
 | --- | --- | --- | --- |
@@ -139,42 +148,25 @@ sample 比对格式”，结果写入 state/summary，避免“文档最佳与�
 该示例展示 Agent 在无人工干预下完成“建模 → 对照 → 回退差方案 → 采纳更优方案”
 的完整反思闭环；此后 run 收尾阶段自动生成了该 run 的最佳提交。
 
-## 5. 失败案例与恢复
-
-1. **LLM 空响应（自动重试）**：deepseek-v4-flash 偶发返回空 content 且
-   `finish_reason='length'`（推理占用全部输出预算）。系统将该调用判定为
-   可恢复错误并自动重试一次；在 `runs/titanic/20260906_205335` 等运行中
-   重试后成功提出下一步方案，未中断迭代。
-2. **非法超参（统一清洗）**：LLM 曾提出 `max_features: auto`，该取值在
-   scikit-learn 1.6 已移除。早期运行 `runs/house_prices/20260907_193918`
-   因此以 `stop_failure` 退出；随后在实验公共层加入超参清洗（auto → sqrt）
-   并重跑成功，成为框架鲁棒性的真实改进案例。
-3. **指标下降回退（revert）**：facial_keypoints 第 2 轮 MLP 的
-   val_rmse=6.11，明显差于 Ridge baseline（3.09），评估器正确判定 revert，
-   最佳结果保持 PCA(96)+Ridge。
-
-以上三类失败分别覆盖“外部 API 异常”“参数合法性错误”“模型效果不佳”，
-且均有状态日志与修复后的成功运行作为证据。
-
-## 6. 局限与改进方向
+## 5. 局限与改进方向
 
 - 5 个 Kaggle 竞赛均为历史比赛，真实线上提交未执行；提交文件仅完成本地格式
-  校验；
+  校验；如需实际上传可显式 `--kaggle-upload`，是否仍开放提交取决于比赛状态；
 - `rule` 大脑是确定性候选序列，不具备真正的“反思式实验设计”；
 - 单次运行不支持断点续跑（暂无 `--resume`）；
 - 依赖声明采用 `>=` 下限，全新环境会随时间解析到更新版本，需定期回归；
 - 后续可扩展方向：自动生成并迭代“特征工程/数据处理代码”而不仅是模型参数、
-  多 run 取均值汇报、将最佳提交回填到仓库的 submissions 目录、断点恢复。
+  多 run 取均值汇报、断点恢复。
 
-## 7. 复现索引
+## 6. 复现索引
 
-### 7.1 零依赖冒烟（无需 Kaggle / API key）
+### 6.1 零依赖冒烟（无需 Kaggle / API key）
 
 ```bash
 python run_agent.py --config config.yaml --brain rule --max-steps 3
 ```
 
-### 7.2 单任务运行与提交
+### 6.2 一键批量 / 单任务运行与提交
 
 ```bash
 python run_agent.py --config configs/titanic.yaml --brain rule --max-steps 3
@@ -183,17 +175,19 @@ python experiments/validate_submission.py \
     --submission submissions/best_titanic_submission.csv \
     --sample data/raw/titanic/gender_submission.csv \
     --id-col PassengerId --required PassengerId,Survived
+
+# 一键批量（数据缺失自动下载）
+python run_all.py --brain llm --max-steps 3
 ```
 
-### 7.3 本报告引用到的运行记录
+### 6.3 已入库的可复现产物
 
 | 内容 | 路径 |
 | --- | --- |
-| titanic 全局最佳 run | runs/titanic/20260906_205335 |
-| house_prices 全局最佳 run | runs/house_prices/20260906_163159 |
-| bike 全局最佳 run | runs/bike_sharing_demand/20260906_163313 |
-| digit 全局最佳 run | runs/digit_recognizer/20260907_194210 |
-| facial 全局最佳 run | runs/facial_keypoints/20260906_163343 |
-| titanic LLM 3 轮过程示例 | runs/titanic/20260907_193841 |
-| house 非法超参失败 run | runs/house_prices/20260907_193918 |
-| 五份全局最佳提交 | submissions/best_*.csv |
+| 5 份全局最佳参数 | submissions/best_<task_id>_params.yaml |
+| 5 份全局最佳提交 | submissions/best_<task_id>_submission.csv |
+| titanic LLM 3 轮完整运行日志 | reports/example_runs/titanic_llm_3_rounds_20260907_193841/ |
+
+说明：产生上述全局最佳的原始 run 目录（gitignore）仍在本地，报告第 4.2 节
+给出的 run_id 可对应到本地 `runs/<task_id>/`；参数 YAML 与示例完整日志已提交，
+因此新 clone 无需历史 run 目录即可复现提交文件与查看完整决策链。

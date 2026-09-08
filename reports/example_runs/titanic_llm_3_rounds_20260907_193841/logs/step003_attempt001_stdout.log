@@ -1,0 +1,4 @@
+[train] titanic: n_train=534, n_val=178, n_test=179
+[train] model=mlp, scaler=True, 训练耗时=0.3642s
+[train] val_acc=0.8258, test_acc=0.8268
+[train] 指标已写入: C:\Users\why\Desktop\Autoresearch-agent-ml\runs\titanic\20260907_193841\metrics\step003_attempt001_metrics.json

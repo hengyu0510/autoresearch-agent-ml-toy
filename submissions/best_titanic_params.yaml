@@ -1,0 +1,4 @@
+model: logistic_regression
+scaler: true
+hyperparams:
+  C: 0.1
