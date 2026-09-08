@@ -93,6 +93,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--quiet", action="store_true",
         help="透传给 run_agent，降低每个任务的终端输出。",
     )
+    parser.add_argument(
+        "--kaggle-upload", action="store_true",
+        help="本地提交校验通过后，再调用 Kaggle CLI 实际上传（默认不上传）。",
+    )
     return parser.parse_args(argv)
 
 
@@ -197,6 +201,8 @@ def build_agent_cmd(
         cmd += ["--runs-root", str(task_runs_root)]
     if args.quiet:
         cmd.append("--quiet")
+    if args.kaggle_upload:
+        cmd.append("--kaggle-upload")
     return cmd
 
 
@@ -450,12 +456,39 @@ def main(argv: list[str] | None = None) -> int:
             brain = args.brain or cfg.brain.type
             run_dir_txt = ""
 
-        status = "ok" if code == 0 else "failed"
         error = summary_error
+        semantic_failed = bool(
+            summary
+            and (
+                summary.get("stop_reason") == "stop_failure"
+                or int(summary.get("successful_iterations") or 0) <= 0
+                or (summary.get("submission") or {}).get("status") == "failed"
+            )
+        )
         if code != 0:
+            status = "failed"
             error = error or (
                 f"run_agent 退出码 {code}；请查看终端输出或上述运行目录日志。"
             )
+        elif not summary:
+            status = "failed"
+            error = error or (
+                "run_agent 退出码 0，但未找到/解析到 summary.json，无法确认成功。"
+            )
+        elif semantic_failed:
+            status = "failed"
+            stop_reason = summary.get("stop_reason", "-")
+            iterations = summary.get("successful_iterations", 0)
+            submission_status = (
+                (summary.get("submission") or {}).get("status", "-")
+            )
+            error = (
+                f"run_agent 进程正常结束但语义失败: stop_reason={stop_reason}, "
+                f"successful_iterations={iterations}, "
+                f"submission.status={submission_status}"
+            )
+        else:
+            status = "ok"
         print(f"[done] {task_id}: status={status}, exit={code}, "
               f"stop_reason={summary.get('stop_reason', '-')}", flush=True)
         results.append(BatchResult(

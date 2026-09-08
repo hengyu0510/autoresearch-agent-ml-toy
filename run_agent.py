@@ -43,6 +43,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--runs-root", type=str, default=None)
     parser.add_argument("--quiet", action="store_true",
                         help="控制台只输出关键信息")
+    parser.add_argument(
+        "--kaggle-upload", action="store_true",
+        help="本地提交校验通过后，可选调用 Kaggle CLI 实际上传（默认不访问网络）",
+    )
     return parser.parse_args(argv)
 
 
@@ -270,6 +274,45 @@ def run_best_submission(
     }
 
 
+def run_kaggle_upload(
+    task_id: str,
+    submission_path: Path,
+    log: Logger,
+) -> dict[str, Any]:
+    """可选实际上传：通过 data/kaggle_upload.py 调用 Kaggle CLI。"""
+    script = PROJECT_ROOT / "data" / "kaggle_upload.py"
+    cmd = [
+        sys.executable, str(script),
+        "--task", task_id,
+        "--submission", str(submission_path),
+        "--message",
+        f"AutoResearch Agent for ML submission {datetime.now():%Y-%m-%d %H:%M:%S}",
+    ]
+    log.info(f"Kaggle 上传（可选）: task={task_id}, file={submission_path}")
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(PROJECT_ROOT),
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"status": "failed", "detail": "Kaggle 上传超时（>300s）"}
+    except Exception as exc:
+        return {"status": "failed", "detail": f"Kaggle 上传启动失败: {exc}"}
+    detail = (proc.stdout or proc.stderr or "").strip()[-2000:]
+    if proc.returncode != 0:
+        log.error(f"Kaggle 上传失败: {detail[-500:]}")
+        return {"status": "failed", "detail": detail}
+    log.info(f"Kaggle 上传成功: {detail[-300:]}")
+    return {"status": "ok", "detail": detail}
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     configure_stdio()
@@ -466,6 +509,19 @@ def main(argv: list[str] | None = None) -> int:
         best_params_file=best_params_file,
         log=log,
     )
+    upload_result: dict[str, Any] | None = None
+    if args.kaggle_upload:
+        if submission_result.get("status") != "ok":
+            upload_result = {
+                "status": "skipped",
+                "detail": "本地提交未成功，不执行上传",
+            }
+        else:
+            upload_result = run_kaggle_upload(
+                Path(args.config).stem,
+                Path(submission_result["submission"]),
+                log,
+            )
     summary = {
         "run_id": run_dir.name,
         "finished_at": datetime.now().isoformat(timespec="seconds"),
@@ -483,7 +539,17 @@ def main(argv: list[str] | None = None) -> int:
         "last_metrics": last_metrics,
         "state_file": str(state.state_file),
         "submission": submission_result,
+        "kaggle_upload": upload_result,
     }
+    submission_status = (submission_result or {}).get("status", "skipped")
+    upload_status = (upload_result or {}).get("status", "skipped")
+    exit_code = 1 if (
+        stop_reason == "stop_failure"
+        or successful_rounds == 0
+        or submission_status == "failed"
+        or upload_status == "failed"
+    ) else 0
+    summary["exit_code"] = exit_code
     (run_dir / "summary.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
     )
@@ -503,10 +569,11 @@ def main(argv: list[str] | None = None) -> int:
     log.info(f"停止原因: {stop_reason}")
     log.info(f"成功迭代: {successful_rounds} 轮")
     log.info(f"最佳结果: {json.dumps(best_metrics, ensure_ascii=False)}")
+    log.info(f"退出码: {exit_code}")
     log.info(f"产物目录: {run_dir}")
     log.info(f"完整状态: {state.state_file}")
     log.close()
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":

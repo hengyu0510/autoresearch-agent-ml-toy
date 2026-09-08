@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import urllib.error
 import urllib.request
@@ -181,6 +182,127 @@ class LLMBrain:
             names = ["logistic_regression", "random_forest", "mlp"]
         return names
 
+    def _allowed_top_level_keys(self) -> set[str]:
+        """LLM 可以写哪些顶层 params 字段（model/scaler/hyperparams + 任务示例字段）。"""
+        keys = {"model", "scaler", "hyperparams"}
+        for cand in self.cfg.experiment.rule_candidates or []:
+            params = cand.get("params") or {}
+            keys.update(k for k in params if isinstance(k, str))
+        return keys
+
+    def _sanitize_llm_params(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """程序级校验/清洗 LLM 返回的 params，失败时给出可读错误。"""
+        if not isinstance(params, dict):
+            raise ValueError(f"params 必须是对象: {params!r}")
+        model = params.get("model")
+        if model not in self._allowed_models():
+            raise ValueError(
+                f"模型不在白名单: {model!r}；可用: {self._allowed_models()}"
+            )
+
+        allowed_keys = self._allowed_top_level_keys()
+        stripped = [k for k in params if k not in allowed_keys]
+        cleaned = {k: v for k, v in params.items() if k in allowed_keys}
+        if stripped:
+            self.log.warning(
+                f"LLM params 包含非白名单顶层字段 {stripped}，已忽略。"
+            )
+
+        if "scaler" in cleaned:
+            scaler = cleaned["scaler"]
+            if isinstance(scaler, str):
+                lowered = scaler.strip().lower()
+                if lowered in ("true", "1", "yes"):
+                    scaler = True
+                elif lowered in ("false", "0", "no"):
+                    scaler = False
+            if not isinstance(scaler, bool):
+                raise ValueError(f"scaler 必须是 bool，收到: {scaler!r}")
+            cleaned["scaler"] = scaler
+
+        hyperparams = cleaned.get("hyperparams") or {}
+        if not isinstance(hyperparams, dict):
+            raise ValueError(f"hyperparams 必须是对象: {hyperparams!r}")
+        self._validate_hyperparams(model, hyperparams)
+
+        # 任务级可选字段（仅当 rule 候选示例中出现时允许）。
+        if "max_rows" in cleaned:
+            value = cleaned["max_rows"]
+            if value is not None:
+                try:
+                    value = int(value)
+                except (TypeError, ValueError):
+                    raise ValueError(f"max_rows 必须是整数或 null: {value!r}")
+                if not 0 < value <= 1_000_000:
+                    raise ValueError(f"max_rows 超出允许范围: {value}")
+                cleaned["max_rows"] = value
+        if "pca_components" in cleaned:
+            value = cleaned["pca_components"]
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"pca_components 必须是整数: {value!r}"
+                )
+            if not 1 <= value <= 2048:
+                raise ValueError(f"pca_components 超出允许范围: {value}")
+            cleaned["pca_components"] = value
+        return cleaned
+
+    @staticmethod
+    def _validate_hyperparams(
+        model: str, hyperparams: dict[str, Any]
+    ) -> None:
+        """拦截明显越界/非法的超参数，避免把机器拖死后再靠 timeout。"""
+        numeric_limits: dict[str, tuple[float, float]] = {
+            "alpha": (1e-9, 1e6),
+            "C": (1e-9, 1e6),
+            "learning_rate": (1e-6, 1.0),
+        }
+        integer_limits: dict[str, tuple[int, int]] = {
+            "n_estimators": (1, 3000),
+            "max_depth": (1, 128),
+            "max_iter": (1, 20000),
+            "min_samples_leaf": (1, 10_000),
+            "min_samples_split": (2, 100_000),
+            "n_iter_no_change": (1, 10_000),
+        }
+        for key, value in hyperparams.items():
+            if value is None:
+                continue
+            if key in numeric_limits:
+                low, high = numeric_limits[key]
+                if isinstance(value, bool) or not isinstance(
+                    value, (int, float)
+                ) or not math.isfinite(float(value)) or not low <= float(value) <= high:
+                    raise ValueError(f"{key}={value!r} 超出允许范围")
+            if key in integer_limits:
+                low, high = integer_limits[key]
+                if isinstance(value, bool) or not isinstance(value, int) \
+                        or not low <= value <= high:
+                    raise ValueError(f"{key}={value!r} 超出允许范围")
+            if key == "hidden_layer_sizes":
+                layers = value if isinstance(value, (list, tuple)) else [value]
+                if not layers or len(layers) > 4:
+                    raise ValueError(
+                        f"hidden_layer_sizes 层数需在 1..4: {value!r}"
+                    )
+                for size in layers:
+                    if isinstance(size, bool) or not isinstance(size, int) \
+                            or not 1 <= size <= 2048:
+                        raise ValueError(
+                            f"hidden_layer_sizes 含非法值: {value!r}"
+                        )
+            if key == "max_features" and model == "random_forest":
+                # sklearn >=1.4 不再接受 RandomForest 的 "auto"
+                if isinstance(value, str) and value.lower() == "auto":
+                    hyperparams[key] = "sqrt"
+            if isinstance(value, (int, float)) and not isinstance(value, bool) \
+                    and not math.isfinite(float(value)):
+                raise ValueError(f"{key}={value!r} 不是有限数值")
+
     def propose(self, step: int, state: RunState) -> Action | None:
         if not self.api_key:
             raise RuntimeError(
@@ -315,6 +437,7 @@ class LLMBrain:
 
     def _content_to_action(self, content: str) -> Action:
         action = self._parse_action(content)
+        action.params = self._sanitize_llm_params(action.params)
         self.log.info(f"LLM 提出方案: {action.description}")
         return action
 

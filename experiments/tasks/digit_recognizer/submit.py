@@ -50,10 +50,14 @@ def main(argv: list[str] | None = None) -> int:
     test_path = Path(args.test_path or PROJECT_ROOT / "data" / "raw" / "digit_recognizer" / "test.csv")
     test_raw = pd.read_csv(test_path)
     if "ImageId" in test_raw.columns:
+        image_ids = test_raw["ImageId"].to_numpy()
         test_raw = test_raw.drop(columns=["ImageId"])
+    else:
+        image_ids = np.arange(1, len(test_raw) + 1)
     X_test = test_raw.to_numpy(dtype=np.uint8)
     X_test = X_test.astype(np.float32) / 255.0
-    image_ids = np.arange(1, len(X_test) + 1)
+    if len(image_ids) != len(X_test):
+        raise ValueError("ImageId 行数与像素矩阵不一致")
 
     scaler = bool(params.get("scaler", False))
     if scaler:

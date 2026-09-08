@@ -51,6 +51,25 @@ def main(argv: list[str] | None = None) -> int:
         sample_ids = sample[args.id_col].tolist()
         if sub_ids != sample_ids:
             raise SystemExit("[fail] id 列顺序或值不一致")
+
+    # 对照 sample 的数值列做基础类型/NaN/Inf 校验（id 列除外）。
+    for col in required:
+        if col == args.id_col or col not in sample.columns:
+            continue
+        if not pd.api.types.is_numeric_dtype(sample[col]):
+            continue
+        try:
+            numeric = pd.to_numeric(sub[col], errors="raise")
+        except (TypeError, ValueError) as exc:
+            raise SystemExit(
+                f"[fail] 提交列 {col!r} 含非数值: {exc}"
+            ) from exc
+        if numeric.isna().any():
+            raise SystemExit(f"[fail] 提交列 {col!r} 含 NaN/空值")
+        if numeric.isin([float("inf"), float("-inf")]).any():
+            raise SystemExit(f"[fail] 提交列 {col!r} 含无穷值")
+    if args.id_col and args.id_col in sub.columns and sub[args.id_col].isna().any():
+        raise SystemExit(f"[fail] id 列 {args.id_col!r} 含 NaN/空值")
     print(
         f"[ok] {Path(args.submission).name}: 列={list(sub.columns)}, "
         f"行数={len(sub)}，与 sample 一致"

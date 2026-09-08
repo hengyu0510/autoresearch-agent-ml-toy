@@ -110,6 +110,11 @@ def build_model(model_name: str, hyperparams: dict, seed: int):
             f"未知模型 {model_name!r}，可用: {sorted(MODEL_BUILDERS)}"
         )
     kwargs = dict(hyperparams)
+    if model_name == "random_forest" and str(
+        kwargs.get("max_features", "")
+    ).lower() == "auto":
+        # sklearn >=1.4 不再接受 RandomForest 的 max_features='auto'
+        kwargs["max_features"] = "sqrt"
     if "random_state" not in kwargs:
         kwargs["random_state"] = seed
     return MODEL_BUILDERS[model_name](**kwargs)

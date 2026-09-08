@@ -51,16 +51,23 @@ DEFAULT_PARAMS = {
 DROP_COLS = ["datetime", "casual", "registered"]
 
 
+def make_features(df: pd.DataFrame) -> pd.DataFrame:
+    """由原始行（保留顺序）派生 hour/weekday/month 并移除泄漏/标识列。"""
+    parsed = pd.to_datetime(df["datetime"])
+    out = df.copy()
+    out["hour"] = parsed.dt.hour
+    out["weekday"] = parsed.dt.weekday
+    out["month"] = parsed.dt.month
+    return out.drop(columns=[c for c in DROP_COLS if c in out.columns])
+
+
 def load_data(path: str) -> pd.DataFrame:
     p = Path(path) if path else DEFAULT_DATA
     if not p.exists():
         raise FileNotFoundError(f"Bike Sharing 数据不存在: {p}")
     df = pd.read_csv(p, parse_dates=["datetime"])
     df = df.sort_values("datetime").reset_index(drop=True)
-    df["hour"] = df["datetime"].dt.hour
-    df["weekday"] = df["datetime"].dt.weekday
-    df["month"] = df["datetime"].dt.month
-    return df.drop(columns=[c for c in DROP_COLS if c in df.columns])
+    return make_features(df)
 
 
 def make_preprocessor(X: pd.DataFrame, scaler: bool) -> ColumnTransformer:

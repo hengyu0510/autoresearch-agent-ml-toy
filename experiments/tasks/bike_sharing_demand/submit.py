@@ -47,9 +47,11 @@ def main(argv: list[str] | None = None) -> int:
 
     test_path = Path(args.test_path or PROJECT_ROOT / "data" / "raw" / "bike_sharing_demand" / "test.csv")
     test_raw = pd.read_csv(test_path)
-    X_test = t.load_data(str(test_path))
-    if "count" in X_test.columns:
-        X_test = X_test.drop(columns=["count"])
+    original = test_raw.copy()
+    if "count" in test_raw.columns:
+        test_raw = test_raw.drop(columns=["count"])
+    # make_features 保持原始行顺序，避免 sort_values 后与 datetime 输出错位。
+    X_test = t.make_features(test_raw)
     if len(test_raw) != len(X_test):
         raise ValueError("test 特征行数与原始 test.csv 不一致")
 
@@ -62,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     pred = np.clip(np.rint(np.expm1(pipe.predict(X_test))), 0, None).astype(int)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame({"datetime": test_raw["datetime"], "count": pred}).to_csv(
+    pd.DataFrame({"datetime": original["datetime"], "count": pred}).to_csv(
         out, index=False
     )
     print(f"[submit] bike_sharing_demand: 已写入 {out}（{len(pred)} 行）")
