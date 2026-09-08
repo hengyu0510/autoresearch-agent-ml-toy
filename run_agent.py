@@ -175,6 +175,29 @@ def summary_exit_code(summary: dict[str, Any]) -> int:
     return 0
 
 
+def render_notebook(state: RunState) -> str:
+    """把 state 中的 insight 事件渲染成可读的实验笔记本。"""
+    lines = [
+        "# 实验笔记",
+        "",
+        "> 每轮实验后由 LLM 反思或确定性兜底生成；会喂给后续 plan。",
+        "",
+    ]
+    insights = state.events("insight")
+    if not insights:
+        lines.append("（暂无 insight）")
+    for e in insights:
+        ts = str(e.get("ts", ""))[:19]
+        lines.append(
+            f"### step {e.get('step')}（{ts}）[{e.get('generator', '?')}]"
+        )
+        lines.append(f"- 诊断: {e.get('diagnosis', '')}")
+        lines.append(f"- 结论: {e.get('conclusion', '')}")
+        lines.append(f"- 假设: {e.get('hypothesis', '')}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def run_best_submission(
     cfg: AgentConfig,
     run_dir: Path,
@@ -490,6 +513,82 @@ def main(argv: list[str] | None = None) -> int:
         )
         save_checkpoint(run_dir, point, brain=cfg.brain.type)
 
+    def record_insight(
+        step: int,
+        *,
+        decision: str,
+        reason: str,
+        description: str,
+        metrics: dict[str, Any],
+    ) -> None:
+        """实验反思：优先 LLM，失败/rule 场景用确定性 insight 兜底。"""
+        reflected: dict[str, Any] | None = None
+        try:
+            reflected = brain.reflect(
+                state=state,
+                step=step,
+                decision=decision,
+                reason=reason,
+                description=description,
+                metrics=metrics,
+            )
+        except Exception as exc:
+            log.warning(f"调用 reflect() 失败，使用确定性 insight: {exc}")
+            reflected = None
+
+        target = cfg.run.target_metric
+        value = metrics.get(target)
+        value_txt = (
+            f"{float(value):.4f}" if isinstance(value, (int, float))
+            else str(value)
+        )
+        best_value = (
+            float(best_metrics.get(target))
+            if best_metrics is not None
+            and isinstance(best_metrics.get(target), (int, float))
+            else None
+        )
+        best_txt = f"{best_value:.4f}" if best_value is not None else "None"
+
+        if reflected:
+            generator = "llm"
+            diagnosis = str(reflected.get("diagnosis", ""))
+            conclusion = str(reflected.get("conclusion", ""))
+            hypothesis = str(reflected.get("hypothesis", ""))
+        else:
+            generator = "deterministic"
+            if decision == "accept":
+                diagnosis = (
+                    f"实验 {description[:100]} 取得 {target}={value_txt}，"
+                    f"达到/不低于当前最佳 {best_txt}。"
+                )
+                conclusion = "本轮方案被采纳为新的最佳方向。"
+                hypothesis = (
+                    "在当前最佳模型附近微调容量/正则，或尝试同族更强配置。"
+                )
+            else:
+                diagnosis = (
+                    f"实验 {description[:100]} 取得 {target}={value_txt}，"
+                    f"未超过当前最佳 {best_txt}。"
+                )
+                conclusion = "本轮方向被回退；不要重复同一配置或同一思路。"
+                hypothesis = (
+                    "回到当前最佳方向，只做更小步的修改并观察是否提升。"
+                )
+
+        state.append(
+            "insight",
+            step=step,
+            generator=generator,
+            decision=decision,
+            diagnosis=diagnosis,
+            conclusion=conclusion,
+            hypothesis=hypothesis,
+        )
+        (run_dir / "notebook.md").write_text(
+            render_notebook(state), encoding="utf-8"
+        )
+
     start_step = resume_state.next_step if resume_state is not None else 1
     for step in range(start_step, cfg.run.max_steps + 1):
         log.info(f"===== 第 {step} 步（共 {cfg.run.max_steps}） =====")
@@ -631,6 +730,13 @@ def main(argv: list[str] | None = None) -> int:
             decision=evaluation.decision,
             successful_rounds=successful_rounds,
             best_metrics=best_metrics,
+        )
+        record_insight(
+            step,
+            decision=evaluation.decision,
+            reason=evaluation.reason,
+            description=action.description,
+            metrics=result.metrics,
         )
 
         # 4) 终止检查：成功阈值 / 收敛 / 继续

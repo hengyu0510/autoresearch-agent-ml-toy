@@ -131,6 +131,19 @@ class RuleBrain:
             source=self.name,
         )
 
+    def reflect(
+        self,
+        *,
+        state: RunState,
+        step: int,
+        decision: str,
+        reason: str,
+        description: str,
+        metrics: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """rule 大脑不调用 LLM 反思，返回 None（由调用方写确定性 insight）。"""
+        return None
+
 
 class LLMBrain:
     name = "llm"
@@ -191,6 +204,15 @@ class LLMBrain:
             "你是自动迭代机器学习实验的 Agent。每次只做一个有依据的小步"
             "修改，基于验证集指标决策。只输出一个合法的 JSON 对象，不要"
             "Markdown 代码块，不要任何前缀、解释或额外文字。"
+        )
+
+    @property
+    def reflect_system_prompt(self) -> str:
+        return (
+            "你是机器学习实验的反思助手。请基于最近一轮实验结果与实验笔记，"
+            "分析该结果意味着什么、哪些方向已被证伪、下一步值得验证什么假设。"
+            "只输出一个 JSON 对象，字段为 diagnosis/conclusion/hypothesis，"
+            "全部是字符串，不要 Markdown 代码块或额外文字。"
         )
 
     def _allowed_models(self) -> list[str]:
@@ -353,30 +375,78 @@ class LLMBrain:
         runs = state.successful_runs()
         target = self.cfg.run.target_metric
         test_key = target.replace("val_", "test_", 1)
-        history = []
-        for i, e in enumerate(runs[-6:], start=1):
-            m = e.get("metrics", {})
-            params = (e.get("params") or {})
+
+        def _fmt(value: Any) -> str:
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return f"{value:.4f}"
+            return str(value)
+
+        plan_by_step: dict[int, dict[str, Any]] = {}
+        execute_by_step: dict[int, dict[str, Any]] = {}
+        evaluate_by_step: dict[int, dict[str, Any]] = {}
+        decision_by_step: dict[int, dict[str, Any]] = {}
+        for e in state.entries:
+            step = e.get("step")
+            if not isinstance(step, int):
+                continue
+            phase = e.get("phase")
+            if phase == "plan":
+                plan_by_step[step] = e
+            elif phase == "execute" and e.get("success") is True:
+                execute_by_step[step] = e
+            elif phase == "evaluate":
+                evaluate_by_step[step] = e
+            elif phase == "decision":
+                decision_by_step[step] = e
+
+        recent_steps = list(evaluate_by_step)[-6:]
+        history: list[str] = []
+        for idx, step in enumerate(recent_steps, start=1):
+            e = evaluate_by_step[step]
+            m = e.get("metrics") or {}
+            params = (execute_by_step.get(step) or {}).get("params") or {}
             model = params.get("model", "?")
-            val_txt = (
-                f"{m[target]:.4f}"
-                if isinstance(m.get(target), (int, float))
-                else str(m.get(target))
+            val_txt = _fmt(m.get(target))
+            test_txt = _fmt(m.get(test_key))
+            decision = e.get("decision", "?")
+            decision_msg = (decision_by_step.get(step) or {}).get(
+                "message", ""
             )
-            test_txt = (
-                f"{m[test_key]:.4f}"
-                if isinstance(m.get(test_key), (int, float))
-                else str(m.get(test_key))
+            rationale = (plan_by_step.get(step) or {}).get(
+                "rationale", ""
             )
             history.append(
-                f"轮次 {i}: model={model}, "
-                f"{target}={val_txt}, {test_key}={test_txt}"
+                f"轮次 {idx}（step {step}）: model={model}, "
+                f"{target}={val_txt}, {test_key}={test_txt}, "
+                f"决策={decision}\n"
+                f"  上一轮理由: {str(rationale)[:240]}\n"
+                f"  决策说明: {str(decision_msg)[:240]}"
             )
         history_txt = "\n".join(history) if history else "（暂无已完成实验）"
+
+        insights = state.events("insight")[-8:]
+        insight_txt = "\n".join(
+            f"- step {e.get('step')} [{e.get('generator', '?')}] "
+            f"diagnosis={e.get('diagnosis', '')}；"
+            f"conclusion={e.get('conclusion', '')}；"
+            f"hypothesis={e.get('hypothesis', '')}"
+            for e in insights
+        ) if insights else "（暂无实验笔记）"
+
+        errors = [e for e in state.entries if e.get("phase") == "error"]
+        error_txt = "\n".join(
+            f"- step {e.get('step')}: {e.get('message', '')} "
+            f"| {str(e.get('error_tail', ''))[:240]}"
+            for e in errors[-3:]
+        ) if errors else "（暂无失败记录）"
+
         return (
             f"任务：{self.cfg.experiment.description}\n"
             f"当前步数：{len(runs) + 1}\n"
             f"已完成的实验：\n{history_txt}\n"
+            f"实验笔记（含结论/待验证假设，已证伪方向不要重复）：\n"
+            f"{insight_txt}\n"
+            f"最近失败/错误：\n{error_txt}\n"
             f"本任务 train.py 仅支持以下模型名：{self._allowed_models()}\n"
             "params.model 必须取上述列表中的值，不要提出白名单外的新模型。\n"
             "请基于以上状态提出下一步唯一的修改方案，并以 JSON 返回："
@@ -387,19 +457,155 @@ class LLMBrain:
         )
 
     def _propose_remote(self, step: int, state: RunState) -> Action:
-        if self.provider == "anthropic":
-            return self._call_anthropic(state)
-        return self._call_openai_compatible(state)
+        content = self._chat_once(
+            user_text=self._build_user_prompt(state),
+            system_text=self.system_prompt,
+            max_tokens=self.max_tokens,
+        )
+        return self._content_to_action(content)
 
-    def _call_openai_compatible(self, state: RunState) -> Action:
+    def reflect(
+        self,
+        *,
+        state: RunState,
+        step: int,
+        decision: str,
+        reason: str,
+        description: str,
+        metrics: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """对上一轮结果做一次轻量 LLM 反思；失败不致命，返回 None。"""
+        if not self.api_key:
+            return None
+        user_text = self._build_reflection_prompt(
+            state, step=step, decision=decision, reason=reason,
+            description=description, metrics=metrics,
+        )
+        try:
+            content = self._chat_once(
+                user_text=user_text,
+                system_text=self.reflect_system_prompt,
+                max_tokens=min(4096, self.max_tokens),
+            )
+            insight = self._parse_reflection(content)
+        except Exception as exc:
+            self.log.warning(
+                f"LLM 反思失败，使用确定性 insight 兜底: {exc}"
+            )
+            return None
+        self.log.info(
+            f"LLM 反思（step {step}）: {insight.get('conclusion', '')[:160]}"
+        )
+        return insight
+
+    def _build_reflection_prompt(
+        self,
+        state: RunState,
+        *,
+        step: int,
+        decision: str,
+        reason: str,
+        description: str,
+        metrics: dict[str, Any],
+    ) -> str:
+        target = self.cfg.run.target_metric
+        metric_txt = ", ".join(
+            f"{k}={v:.4f}" if isinstance(v, (int, float))
+            else f"{k}={v}"
+            for k, v in (metrics or {}).items()
+            if not isinstance(v, (dict, list))
+        )
+        insights = state.events("insight")[-6:]
+        insight_txt = "\n".join(
+            f"- step {e.get('step')}: diagnosis={e.get('diagnosis', '')}；"
+            f"conclusion={e.get('conclusion', '')}；"
+            f"hypothesis={e.get('hypothesis', '')}"
+            for e in insights
+        ) if insights else "（暂无）"
+        return (
+            f"任务：{self.cfg.experiment.description}\n"
+            f"当前 step={step}，决策={decision}\n"
+            f"本轮方案描述：{description}\n"
+            f"评估说明：{reason}\n"
+            f"本轮指标：{metric_txt}\n"
+            f"实验笔记：\n{insight_txt}\n"
+            "请输出 JSON："
+            '{"diagnosis": "为什么这轮会这样", '
+            '"conclusion": "本轮结论/哪些方向被证伪", '
+            '"hypothesis": "下一步值得验证的假设"}'
+        )
+
+    @staticmethod
+    def _parse_reflection(content: str) -> dict[str, Any]:
+        text = content.strip()
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if lines and lines[0].strip().lower().startswith("```json"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            raise ValueError(f"反思输出不是合法 JSON: {content[:200]}")
+        data = json.loads(text[start:end + 1])
+        insight = {
+            "diagnosis": str(data.get("diagnosis", "")).strip(),
+            "conclusion": str(data.get("conclusion", "")).strip(),
+            "hypothesis": str(data.get("hypothesis", "")).strip(),
+        }
+        if not all(insight.values()):
+            raise ValueError(f"反思 JSON 缺少 diagnosis/conclusion/hypothesis: {data}")
+        return insight
+
+    def _chat_once(
+        self,
+        *,
+        user_text: str,
+        system_text: str,
+        max_tokens: int,
+    ) -> str:
+        """OpenAI 兼容 / Anthropic 的统一 chat 调用。"""
+        if self.provider == "anthropic":
+            if self.reasoning_effort:
+                self.log.warning(
+                    "reasoning_effort 暂不映射到 Anthropic Messages API，已忽略"
+                )
+            payload = {
+                "model": self.model,
+                "max_tokens": max_tokens,
+                "temperature": self.temperature,
+                "system": system_text,
+                "messages": [{"role": "user", "content": user_text}],
+            }
+            req = urllib.request.Request(
+                f"{self.base_url}/v1/messages",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "x-api-key": self.api_key,
+                    "anthropic-version": "2023-06-01",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            parts = body.get("content") or []
+            content = "\n".join(
+                p.get("text", "") for p in parts if p.get("type") == "text"
+            )
+            if not content:
+                raise ValueError(f"Anthropic 返回空文本: {body}")
+            return content
+
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": self._build_user_prompt(state)},
+                {"role": "system", "content": system_text},
+                {"role": "user", "content": user_text},
             ],
             "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
+            "max_tokens": max_tokens,
         }
         if self.reasoning_effort:
             payload["reasoning_effort"] = self.reasoning_effort
@@ -417,45 +623,11 @@ class LLMBrain:
         content = body["choices"][0]["message"]["content"]
         if not content:
             raise ValueError(
-                "DeepSeek 返回空 content；"
+                "模型返回空 content；"
                 f"finish_reason="
                 f"{body['choices'][0].get('finish_reason')!r}"
             )
-        return self._content_to_action(content)
-
-    def _call_anthropic(self, state: RunState) -> Action:
-        if self.reasoning_effort:
-            self.log.warning(
-                "reasoning_effort 暂不映射到 Anthropic Messages API，已忽略"
-            )
-        payload = {
-            "model": self.model,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-            "system": self.system_prompt,
-            "messages": [
-                {"role": "user", "content": self._build_user_prompt(state)},
-            ],
-        }
-        req = urllib.request.Request(
-            f"{self.base_url}/v1/messages",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": self.api_key,
-                "anthropic-version": "2023-06-01",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-        parts = body.get("content") or []
-        content = "\n".join(
-            p.get("text", "") for p in parts if p.get("type") == "text"
-        )
-        if not content:
-            raise ValueError(f"Anthropic 返回空文本: {body}")
-        return self._content_to_action(content)
+        return content
 
     def _content_to_action(self, content: str) -> Action:
         action = self._parse_action(content)
