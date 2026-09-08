@@ -28,7 +28,7 @@
 | 终止机制 | 各任务 config 默认 `max_steps=6`、`min_iterations=3`；提升不足达到收敛轮数、达到最大步数、连续失败三类退出均写入 state；`stop_failure`/0 轮成功/提交失败映射为非零退出码 |
 | 状态记录 | `runs/<task_id>/<timestamp>/state.jsonl` 全量事件 + `checkpoint.json` 断点；含输入、决策、工具调用、输出、错误与下一步动作 |
 | 断点续跑 | `run_agent --resume [run_dir|latest]` / `run_all --resume`：从 checkpoint 的 next_step 恢复大脑游标、最佳参数、收敛状态；无 checkpoint 旧 run 从 state.jsonl 重建；已正常完成 run 拒绝恢复 |
-| 可配置项 | 任务与 `rule_candidates`、指标方向、LLM provider/model/base_url/api_key_env/reasoning_effort/max_tokens、运行预算与阈值 |
+| 可配置项 | 任务与 `rule_candidates`、受控 `feature_ops` 白名单、指标方向、LLM provider/model/base_url/api_key_env/reasoning_effort/max_tokens、运行预算与阈值 |
 | 提交管线 | 每任务 `submit.py` 用全部有标签数据重训并输出 Kaggle 格式文件；run_agent 收尾自动用最佳快照生成提交并调用 `experiments/validate_submission.py` 校验（行序/数值/NaN/Inf）；可显式 `--kaggle-upload` 实际上传，默认不访问网络 |
 | 可复现性 | 单任务：`python run_agent.py --config configs/<task_id>.yaml --brain rule|llm --max-steps 3`；全局最佳参数提交为 `submissions/best_<task_id>_params.yaml`，示例完整运行入库于 `reports/example_runs/` |
 | 批量入口 | `python run_all.py [--tasks <id,...>] [--brain rule|llm] [--max-steps N]`：数据缺失自动下载，按序运行一个或全部任务，单任务失败不中断，汇总报告写入 `runs/batch/<timestamp>/` |
@@ -58,7 +58,10 @@ run_agent 会把内部状态写入 `runs/<task_id>/<timestamp>/checkpoint.json`�
 - insight 写入 `state.jsonl` 与 `notebook.md`，随 run/`--resume` 保留；
 - plan 的上下文包含：最近实验及上轮 rationale、最近 insight、最近失败记录；
 - 反思只影响下一轮 plan，不改变 accept/revert/停止逻辑；
-- 反思目前限定在模型/缩放/超参空间，不直接改训练/数据处理代码。
+- 反思既能提出模型/缩放/超参假设，也能在启用 `feature_ops` 的任务（当前为
+  titanic）上提出白名单内的特征假设；Agent 不直接改训练/数据处理代码；
+- `feature_ops` 只允许取 config `task.feature_ops` 中声明的 id，实现位于
+  对应任务 train.py/submit.py，越权算子会被 planner 拒绝。
 
 ## 3. 工作约定
 
@@ -133,6 +136,8 @@ Autoresearch-agent-ml/
 - [x] 反思与实验笔记：LLM 每轮 reflect（diagnosis/conclusion/hypothesis）写
       state + notebook.md；plan prompt 注入历史 rationale/insight/失败记录；
       反思失败走确定性兜底；
+- [x] titanic 受控特征算子：config 声明 feature_ops 白名单，LLM params 可选
+      特征子集；train/submit 只实现白名单算子，越权算子被拒绝；
 - [x] LLM params 程序级白名单与资源/超参边界校验，非白名单字段自动忽略；
 - [x] 提交管线修复：bike/digit 保留原始行序与 ImageId；validator 增加数值/NaN/Inf
       校验；`--kaggle-upload` 可显式实际上传；

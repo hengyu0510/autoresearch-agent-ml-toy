@@ -92,6 +92,9 @@ RUN_LOG.md，满足
 - 每轮评估后追加轻量 reflect，返回 diagnosis/conclusion/hypothesis；insight
   写入 state.jsonl 与 notebook.md，并在后续 plan prompt 中作为实验笔记参考
   （反思失败自动回退确定性 insight）；
+- titanic 通过 config `task.feature_ops` 白名单开放受控特征算子
+  （add_family_size/add_is_alone/add_title/add_fare_log），LLM 只能选算子
+  子集，train.py/submit.py 只实现白名单逻辑，Agent 不直接改代码；
 - LLM 输出的 params 会先做程序级校验：模型名必须在白名单内、顶层字段只保留
   配置允许的 key、scaler/hyperparams/任务级字段做类型与边界清洗
   （如 `max_features: auto → sqrt`、`n_estimators`/`max_iter` 上限）；
@@ -161,10 +164,11 @@ sample 比对格式（含行序、数值/NaN/Inf 校验）”，结果写入 sta
 - 5 个 Kaggle 竞赛均为历史比赛，真实线上提交未执行；提交文件仅完成本地格式
   校验；如需实际上传可显式 `--kaggle-upload`，是否仍开放提交取决于比赛状态；
 - `rule` 大脑是确定性候选序列，不具备真正的“反思式实验设计”；LLM 已具备
-  轻量反思与实验笔记，但行动空间仍限于模型/缩放/超参；
+  轻量反思、实验笔记与 titanic 受控特征算子；其他任务尚未启用 feature_ops，
+  且 Agent 仍不能任意改代码；
 - 依赖声明采用 `>=` 下限，全新环境会随时间解析到更新版本，需定期回归；
-- 后续可扩展方向：自动生成并迭代“特征工程/数据处理代码”而不仅是模型参数、
-  多 run 取均值汇报、断点恢复。
+- 后续可扩展方向：把 feature_ops 白名单扩展到其余 4 个任务、自动生成更多
+  白名单特征算子、多 run 取均值汇报。
 
 ## 6. 复现索引
 
